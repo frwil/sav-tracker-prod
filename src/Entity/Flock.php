@@ -10,6 +10,7 @@ use ApiPlatform\Metadata\Post;
 use ApiPlatform\Metadata\Patch;
 use ApiPlatform\Metadata\Delete;
 use Doctrine\ORM\Mapping as ORM;
+use ApiPlatform\Metadata\ApiFilter;
 use App\Repository\FlockRepository;
 use ApiPlatform\Metadata\ApiResource;
 use ApiPlatform\OpenApi\Model\Schema;
@@ -22,6 +23,7 @@ use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping\HasLifecycleCallbacks;
 use App\Validator\Constraints\BuildingAvailable;
 use Doctrine\Common\Collections\ArrayCollection;
+use ApiPlatform\Doctrine\Orm\Filter\SearchFilter;
 use Symfony\Component\Serializer\Attribute\Groups;
 use Symfony\Component\Serializer\Attribute\SerializedName;
 
@@ -57,6 +59,7 @@ use Symfony\Component\Serializer\Attribute\SerializedName;
     ]
 )]
 #[BuildingAvailable] // Contrainte personnalisée
+#[ApiFilter(SearchFilter::class, properties: ['building.customer' => 'exact'])]
 class Flock
 {
     // public const FEED_STRATEGY_INDUSTRIAL = 'INDUSTRIAL'; // Branche A

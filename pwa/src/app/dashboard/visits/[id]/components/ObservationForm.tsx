@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { useSync } from "@/providers/SyncProvider";
+import { compressImage } from "@/utils/imageCompressor";
 import {
     API_URL,
     ProphylaxisTask,
@@ -30,6 +31,8 @@ export const ObservationForm = ({
     const isEditMode = !!initialData?.id;
     const [vaccines, setVaccines] = useState<ProphylaxisTask[]>([]);
     const [dueVaccines, setDueVaccines] = useState<ProphylaxisTask[]>([]);
+    const [photos, setPhotos] = useState<{ content: string; filename: string }[]>([]);
+    const [isCompressing, setIsCompressing] = useState(false);
 
     // --- 1. DÉTECTION DU CONTEXTE ---
     const specName = flock.speculation?.name?.toLowerCase() || "";
@@ -424,6 +427,8 @@ export const ObservationForm = ({
             detectedProblems: newProblems,
             resolvedProblems: resolvedProblemIds,
             data: finalData,
+            // 👇 C'est ici qu'on envoie les photos au backend
+            newPhotos: photos 
         };
 
         const url = isEditMode
@@ -545,6 +550,30 @@ export const ObservationForm = ({
         }
         setLoading(true);
         await saveObservation();
+    };
+
+    const handlePhotoAdd = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            setIsCompressing(true);
+            try {
+                const file = e.target.files[0];
+                const compressedBase64 = await compressImage(file);
+                
+                setPhotos(prev => [
+                    ...prev, 
+                    { content: compressedBase64, filename: file.name }
+                ]);
+            } catch (err) {
+                alert("Erreur lors du traitement de l'image");
+                console.error(err);
+            } finally {
+                setIsCompressing(false);
+            }
+        }
+    };
+
+    const removePhoto = (index: number) => {
+        setPhotos(prev => prev.filter((_, i) => i !== index));
     };
 
     // --- RENDER ---
@@ -1584,6 +1613,45 @@ export const ObservationForm = ({
                             </div>
                         </div>
                     </div>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
+                    <h4 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2">
+                        📸 Photos du lot
+                    </h4>
+                    
+                    <div className="grid grid-cols-3 gap-3 mb-3">
+                        {photos.map((photo, idx) => (
+                            <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-gray-300 shadow-sm">
+                                <img src={photo.content} alt="Preview" className="w-full h-full object-cover" />
+                                <button
+                                    type="button"
+                                    onClick={() => removePhoto(idx)}
+                                    className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold shadow"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        ))}
+                        
+                        {/* Bouton d'ajout */}
+                        <label className={`flex flex-col items-center justify-center aspect-square rounded-lg border-2 border-dashed border-gray-300 cursor-pointer hover:bg-gray-100 transition ${isCompressing ? 'opacity-50' : ''}`}>
+                            <span className="text-2xl">📷</span>
+                            <span className="text-[10px] font-bold text-gray-500 mt-1">
+                                {isCompressing ? '...' : 'Ajouter'}
+                            </span>
+                            <input 
+                                type="file" 
+                                accept="image/*" 
+                                capture="environment" // Force la caméra arrière sur mobile
+                                className="hidden" 
+                                onChange={handlePhotoAdd}
+                                disabled={isCompressing}
+                            />
+                        </label>
+                    </div>
+                    <p className="text-[10px] text-gray-400 italic">
+                        Les photos sont compressées automatiquement pour l'envoi rapide.
+                    </p>
                 </div>
 
                 <div className="flex gap-3 justify-end pt-6 border-t border-gray-100">

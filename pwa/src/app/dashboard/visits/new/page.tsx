@@ -26,7 +26,6 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 export default function NewVisitPage() {
     const router = useRouter();
     const { addToQueue } = useSync();
-    // useCustomers gère déjà le cache React Query, donc ça marche offline si déjà chargé
     const { options: customerOptions, loading: customersLoading } = useCustomers();
 
     const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -55,16 +54,13 @@ export default function NewVisitPage() {
                 return;
             }
 
-            // OFFLINE : On ne peut pas vérifier les doublons serveur, on fait confiance.
-            if (!navigator.onLine) {
-                return;
-            }
+            // OFFLINE : On ne peut pas vérifier les doublons serveur
+            if (!navigator.onLine) return;
 
             setCheckingStatus(true);
             const token = localStorage.getItem('sav_token');
 
             try {
-                // On cherche une visite active
                 const res = await fetch(`${API_URL}/visits?customer=${selectedCustomer.value}&closed=false&activated=true`, {
                     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/ld+json' }
                 });
@@ -86,7 +82,6 @@ export default function NewVisitPage() {
                 }
             } catch (e) {
                 console.error("Erreur vérification visite", e);
-                // On ne bloque pas en cas d'erreur technique
             } finally {
                 setCheckingStatus(false);
             }
@@ -95,12 +90,38 @@ export default function NewVisitPage() {
         checkExistingVisit();
     }, [selectedCustomer]);
 
-    // --- 2. NAVIGATION INTELLIGENTE ---
+    // --- 2. GÉOLOCALISATION AUTOMATIQUE (Dès l'arrivée sur l'étape 3) ---
+    useEffect(() => {
+        if (step === 3) {
+            setIsGeolocating(true);
+            setGpsCoordinates(''); // Reset avant nouvelle tentative
+
+            if ('geolocation' in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        setGpsCoordinates(`${position.coords.latitude}, ${position.coords.longitude}`);
+                        setIsGeolocating(false);
+                    },
+                    (err) => {
+                        console.warn("Erreur GPS:", err);
+                        setGpsCoordinates("Non détecté (Erreur GPS)");
+                        setIsGeolocating(false);
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
+            } else {
+                setGpsCoordinates("GPS non supporté");
+                setIsGeolocating(false);
+            }
+        }
+    }, [step]); // Se déclenche quand on arrive à l'étape 3
+
+    // --- 3. NAVIGATION ET HISTORIQUE ---
     const handleNextStep = async () => {
         if (!selectedCustomer) return;
         if (activeVisit) return;
 
-        // OFFLINE : On saute l'étape "Revue historique" car on ne peut pas charger les données
+        // OFFLINE : Sauter l'étape historique
         if (!navigator.onLine) {
             setLastVisit(null); 
             setStep(3); 
@@ -110,7 +131,6 @@ export default function NewVisitPage() {
         const token = localStorage.getItem('sav_token');
 
         try {
-            // Récupérer la dernière visite TERMINÉE
             const lastRes = await fetch(`${API_URL}/visits?customer=${selectedCustomer.value}&order[createdAt]=desc&itemsPerPage=1`, {
                 headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/ld+json' }
             });
@@ -121,8 +141,6 @@ export default function NewVisitPage() {
                 
                 if (lastVisits.length > 0) {
                     const lv = lastVisits[0];
-                    
-                    // Extraction des problèmes
                     let problems: any[] = [];
                     if (lv.observations && lv.observations.length > 0) {
                         lv.observations.forEach((obs: any) => {
@@ -144,7 +162,6 @@ export default function NewVisitPage() {
                         recommendations: lv.report || "Aucune recommandation enregistrée."
                     });
                     
-                    // Génération Checklist
                     const newChecklist = problems.map((p: any, idx: number) => ({
                         id: idx,
                         text: typeof p === 'string' ? p : `Vérifier : ${p.description}`,
@@ -165,31 +182,11 @@ export default function NewVisitPage() {
             }
         } catch (err) {
             console.error("Erreur historique", err);
-            setStep(3); // En cas d'erreur, on laisse avancer
+            setStep(3);
         }
     };
 
-    const handleGeolocate = () => {
-        setIsGeolocating(true);
-        if ('geolocation' in navigator) {
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    setGpsCoordinates(`${position.coords.latitude}, ${position.coords.longitude}`);
-                    setIsGeolocating(false);
-                },
-                (error) => {
-                    alert('Erreur GPS: ' + error.message);
-                    setIsGeolocating(false);
-                },
-                { enableHighAccuracy: true, timeout: 5000 }
-            );
-        } else {
-            alert("Géolocalisation non supportée.");
-            setIsGeolocating(false);
-        }
-    };
-
-    // --- 3. SOUMISSION ROBUSTE (OFFLINE-FIRST) ---
+    // --- 4. SOUMISSION ---
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         
@@ -202,10 +199,10 @@ export default function NewVisitPage() {
         setError('');
 
         const payload = {
-            customer: selectedCustomer?.value, // C'est une IRI (/api/customers/123)
+            customer: selectedCustomer?.value,
             objective: objective,
-            gpsCoordinates: gpsCoordinates,
-            visitedAt: new Date().toISOString(), // Important pour l'affichage optimiste
+            gpsCoordinates: gpsCoordinates.includes('Erreur') || gpsCoordinates.includes('Non') ? null : gpsCoordinates,
+            visitedAt: new Date().toISOString(),
             activated: true,
             closed: false
         };
@@ -213,15 +210,13 @@ export default function NewVisitPage() {
         const url = '/visits';
         const method = 'POST';
 
-        // A. CAS OFFLINE DÉTECTÉ
         if (!navigator.onLine) {
             addToQueue({ url, method, body: payload });
-            alert("🌐 Mode Hors-Ligne : Visite créée localement. Elle sera synchronisée dès le retour de la connexion.");
+            alert("🌐 Mode Hors-Ligne : Visite créée localement.");
             router.push('/dashboard/visits');
             return;
         }
 
-        // B. CAS ONLINE
         try {
             const token = localStorage.getItem('sav_token');
             const res = await fetch(`${API_URL}${url}`, {
@@ -232,29 +227,17 @@ export default function NewVisitPage() {
 
             if (!res.ok) {
                 const errorData = await res.json().catch(() => ({}));
-                const errorMessage = errorData['hydra:description'] || errorData.detail || 'Erreur lors de la création';
-                const apiError: any = new Error(errorMessage);
-                apiError.status = res.status;
-                throw apiError;
+                const errorMessage = errorData['hydra:description'] || 'Erreur lors de la création';
+                throw new Error(errorMessage);
             }
 
-            // Succès
             router.push('/dashboard/visits');
 
         } catch (err: any) {
             console.error(err);
-
-            // Si c'est une erreur API (400, 500), c'est une vraie erreur, on affiche
-            if (err.status) {
-                setError(`Erreur serveur (${err.status}) : ${err.message}`);
-                setIsSubmitting(false);
-            } else {
-                // Si pas de status, c'est une erreur RÉSEAU (coupure pendant l'envoi)
-                // => SAUVEGARDE AUTOMATIQUE EN QUEUE
-                addToQueue({ url, method, body: payload });
-                alert("⚠️ Connexion perdue pendant l'envoi. Visite sauvegardée en mode hors-ligne.");
-                router.push('/dashboard/visits');
-            }
+            addToQueue({ url, method, body: payload });
+            alert("⚠️ Problème connexion. Visite sauvegardée hors-ligne.");
+            router.push('/dashboard/visits');
         }
     };
 
@@ -273,7 +256,6 @@ export default function NewVisitPage() {
             {step === 1 && (
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 animate-in fade-in">
                     <label className="block text-sm font-bold text-gray-700 mb-2">Sélectionner le Client</label>
-                    
                     <Select
                         className="mb-6"
                         options={customerOptions}
@@ -281,40 +263,28 @@ export default function NewVisitPage() {
                         value={selectedCustomer}
                         onChange={setSelectedCustomer}
                         placeholder="Rechercher un client..."
-                        noOptionsMessage={() => "Aucun client trouvé"}
                         isDisabled={checkingStatus}
                     />
-
-                    {checkingStatus && <p className="text-sm text-gray-500 animate-pulse mb-4">🔍 Vérification du dossier client...</p>}
-
-                    {/* ALERTE VISITE DÉJÀ ACTIVE */}
+                    {checkingStatus && <p className="text-sm text-gray-500 animate-pulse mb-4">🔍 Vérification...</p>}
+                    
                     {activeVisit ? (
                         <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded animate-in slide-in-from-top-2">
                             <div className="flex items-center gap-3">
                                 <span className="text-2xl">⛔</span>
                                 <div>
-                                    <h3 className="font-bold text-red-900 text-sm">IMPOSSIBLE DE CRÉER UNE VISITE</h3>
-                                    <p className="text-red-700 text-xs mt-1">
-                                        Une visite est déjà ouverte chez ce client depuis le <strong>{new Date(activeVisit.date).toLocaleDateString()}</strong>.
-                                        {activeVisit.tech && <span> (Tech: {activeVisit.tech})</span>}
-                                    </p>
+                                    <h3 className="font-bold text-red-900 text-sm">VISITE DÉJÀ EN COURS</h3>
+                                    <p className="text-red-700 text-xs mt-1">Depuis le {new Date(activeVisit.date).toLocaleDateString()}</p>
                                 </div>
                             </div>
-                            
-                            <Link 
-                                href={`/dashboard/visits/${activeVisit.id}`}
-                                className="mt-4 block w-full text-center py-3 bg-red-600 text-white font-bold rounded shadow hover:bg-red-700 transition"
-                            >
-                                👉 REPRENDRE LA VISITE #{activeVisit.id}
+                            <Link href={`/dashboard/visits/${activeVisit.id}`} className="mt-4 block w-full text-center py-3 bg-red-600 text-white font-bold rounded shadow hover:bg-red-700 transition">
+                                👉 REPRENDRE LA VISITE
                             </Link>
                         </div>
                     ) : (
                         <button
                             onClick={handleNextStep}
                             disabled={!selectedCustomer || checkingStatus}
-                            className={`w-full py-4 rounded-xl font-bold text-white shadow-lg transition mt-4 
-                                ${!selectedCustomer || checkingStatus ? 'bg-gray-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:scale-[1.02]'}
-                            `}
+                            className={`w-full py-4 rounded-xl font-bold text-white shadow-lg transition mt-4 ${!selectedCustomer || checkingStatus ? 'bg-gray-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                         >
                             Suivant ➜
                         </button>
@@ -331,20 +301,16 @@ export default function NewVisitPage() {
                             <span className="text-xs font-bold text-gray-500 uppercase">Le {lastVisit.date}</span>
                             <span className="bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded-full">{lastVisit.tech}</span>
                         </div>
-                        
                         {lastVisit.problems && lastVisit.problems.length > 0 && (
                             <div className="mb-4">
-                                <h4 className="text-xs font-bold text-red-800 uppercase mb-1">Problèmes signalés :</h4>
+                                <h4 className="text-xs font-bold text-red-800 uppercase mb-1">Problèmes :</h4>
                                 <ul className="list-disc pl-4 text-sm text-gray-700">
                                     {lastVisit.problems.map((p, idx) => (
-                                        <li key={idx}>
-                                            {typeof p === 'string' ? p : `${p.description} (${p.severity})`}
-                                        </li>
+                                        <li key={idx}>{typeof p === 'string' ? p : `${p.description} (${p.severity})`}</li>
                                     ))}
                                 </ul>
                             </div>
                         )}
-
                         <div className="mt-2">
                             <h4 className="text-xs font-bold text-green-800 uppercase mb-1">Recommandations :</h4>
                             <p className="text-gray-800 italic text-sm">"{lastVisit.recommendations}"</p>
@@ -352,7 +318,7 @@ export default function NewVisitPage() {
                     </div>
                     
                     <div>
-                        <h3 className="font-bold text-sm text-gray-700 mb-2">Checklist de vérification</h3>
+                        <h3 className="font-bold text-sm text-gray-700 mb-2">Checklist</h3>
                         <div className="space-y-2">
                             {checklist.map((item) => (
                                 <label key={item.id} className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition">
@@ -365,9 +331,7 @@ export default function NewVisitPage() {
 
                     <div className="flex justify-between pt-4">
                         <button onClick={() => setStep(1)} className="text-gray-500 font-medium hover:text-gray-700">Retour</button>
-                        <button onClick={() => setStep(3)} className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-indigo-700 transition shadow">
-                            Tout est vu, commencer
-                        </button>
+                        <button onClick={() => setStep(3)} className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-indigo-700 transition shadow">Continuer</button>
                     </div>
                 </div>
             )}
@@ -377,9 +341,7 @@ export default function NewVisitPage() {
                 <div className="bg-white p-6 rounded-xl shadow-sm space-y-6 animate-in slide-in-from-right-4">
                     <h2 className="text-lg font-semibold flex items-center gap-2">
                         🚀 Démarrer la visite
-                        <span className="text-sm font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                            {selectedCustomer?.label}
-                        </span>
+                        <span className="text-sm font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{selectedCustomer?.label}</span>
                     </h2>
                     
                     {error && (<div className="bg-red-50 text-red-600 p-3 rounded-md text-sm border border-red-100">{error}</div>)}
@@ -391,32 +353,36 @@ export default function NewVisitPage() {
                                 required 
                                 className="w-full rounded-lg border-gray-300 shadow-sm border p-3 focus:ring-2 focus:ring-indigo-500 outline-none transition" 
                                 rows={3} 
-                                placeholder="Ex: Contrôle de routine, Problème sanitaire..."
+                                placeholder="Ex: Contrôle de routine..."
                                 value={objective} 
                                 onChange={(e) => setObjective(e.target.value)} 
                             />
                         </div>
                         
+                        {/* --- GPS AUTOMATIQUE --- */}
                         <div>
                             <label className="block text-sm font-bold text-gray-700 mb-2">Position GPS</label>
-                            <div className="flex gap-2">
+                            <div className="relative">
                                 <input 
                                     type="text" 
                                     readOnly 
-                                    className="block w-full rounded-lg border border-gray-300 bg-gray-100 p-2 text-sm text-gray-500" 
-                                    value={gpsCoordinates} 
-                                    placeholder="Non localisé" 
+                                    className={`block w-full rounded-lg border border-gray-300 bg-gray-100 p-2 text-sm pr-10 transition-colors ${
+                                        isGeolocating ? 'text-blue-600 italic' : gpsCoordinates.includes('Non') ? 'text-red-500' : 'text-green-700 font-bold'
+                                    }`}
+                                    value={isGeolocating ? "Localisation en cours..." : gpsCoordinates || "En attente..."} 
                                 />
-                                <button 
-                                    type="button" 
-                                    onClick={handleGeolocate} 
-                                    disabled={isGeolocating} 
-                                    className="bg-green-100 text-green-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-200 transition disabled:opacity-50"
-                                >
-                                    {isGeolocating ? '⏳ ...' : '📍 Localiser'}
-                                </button>
+                                {/* Icône de statut à droite */}
+                                <div className="absolute right-3 top-2">
+                                    {isGeolocating ? (
+                                        <span className="animate-spin block">⏳</span>
+                                    ) : gpsCoordinates && !gpsCoordinates.includes('Non') ? (
+                                        <span>✅</span>
+                                    ) : (
+                                        <span>❌</span>
+                                    )}
+                                </div>
                             </div>
-                            <p className="text-xs text-gray-400 mt-1">Nécessaire pour valider le passage.</p>
+                            <p className="text-xs text-gray-400 mt-1">Détectée automatiquement pour valider le passage.</p>
                         </div>
 
                         <div className="flex justify-between pt-4 border-t border-gray-100">
@@ -424,11 +390,9 @@ export default function NewVisitPage() {
                             <button 
                                 type="submit" 
                                 disabled={isSubmitting} 
-                                className={`px-8 py-3 rounded-lg font-bold text-white shadow-lg transition transform active:scale-95 
-                                    ${isSubmitting ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}
-                                `}
+                                className={`px-8 py-3 rounded-lg font-bold text-white shadow-lg transition transform active:scale-95 ${isSubmitting ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                             >
-                                {isSubmitting ? 'Enregistrement...' : '🚀 DÉMARRER LA VISITE'}
+                                {isSubmitting ? 'Enregistrement...' : '🚀 DÉMARRER'}
                             </button>
                         </div>
                     </form>

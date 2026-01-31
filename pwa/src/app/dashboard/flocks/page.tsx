@@ -70,7 +70,7 @@ export default function FlocksPage() {
     // --- REQUÊTES (Cache v2) ---
     const { data: flocks = [], isLoading: flocksLoading, isError: flocksError } = useQuery<Flock[]>({
         queryKey: ['flocks_v2', selectedCustomerOption?.value], 
-        queryFn: () => fetchWithAuth(`/flocks?customer=${selectedCustomerOption?.value}&order[startDate]=DESC`),
+        queryFn: () => fetchWithAuth(`/flocks?building.customer=${selectedCustomerOption?.value}&order[startDate]=DESC`),
         enabled: !!selectedCustomerOption?.value,
         staleTime: 1000 * 60 * 5, 
     });

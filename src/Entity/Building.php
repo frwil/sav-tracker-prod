@@ -8,13 +8,13 @@ use ApiPlatform\Metadata\Post;
 use ApiPlatform\Metadata\Patch;
 use ApiPlatform\Metadata\Delete;
 use Doctrine\ORM\Mapping as ORM;
-use Doctrine\ORM\Mapping\ManyToOne;
-use Doctrine\ORM\Mapping\JoinColumn;
+use ApiPlatform\Metadata\ApiFilter;
 use ApiPlatform\Metadata\ApiResource;
 use App\Repository\BuildingRepository;
 use ApiPlatform\Metadata\GetCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\Common\Collections\ArrayCollection;
+use ApiPlatform\Doctrine\Orm\Filter\SearchFilter;
 use Symfony\Component\Serializer\Attribute\Groups;
 // src/Entity/Building.php
 #[ORM\Entity(repositoryClass: BuildingRepository::class)]
@@ -30,6 +30,7 @@ use Symfony\Component\Serializer\Attribute\Groups;
     normalizationContext: ['groups' => ['building:read']],
     denormalizationContext: ['groups' => ['building:write']]
 )]
+#[ApiFilter(SearchFilter::class, properties: ['customer' => 'exact'])]
 class Building
 {
     #[ORM\Id, ORM\GeneratedValue, ORM\Column]

@@ -21,11 +21,13 @@ use Symfony\Component\Serializer\Attribute\Groups;
 use Doctrine\Common\Collections\Collection;
 use Symfony\Component\Serializer\Attribute\SerializedName;
 use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
+use App\Entity\ObservationPhoto; // ✅ Ajouter l'import
+use Symfony\Component\HttpFoundation\File\File;
 
 #[ORM\Entity(repositoryClass: ObservationRepository::class)]
 #[ORM\HasLifecycleCallbacks]
 #[UniqueEntity(
-    fields: ['visit', 'flock'], 
+    fields: ['visit', 'flock'],
     message: "Une observation a déjà été saisie pour cette bande lors de cette visite."
 )]
 #[AppAssert\ConsistentObservationDate]
@@ -44,7 +46,7 @@ use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
     denormalizationContext: ['groups' => ['observation:write']]
 )]
 #[ApiFilter(SearchFilter::class, properties: [
-    'visit' => 'exact', 
+    'visit' => 'exact',
     'visit.technician' => 'exact', // Indispensable pour les stats "Santé du Parc" par technicien
     'flock' => 'exact'
 ])]
@@ -106,12 +108,16 @@ class Observation
     private array $data = [];
 
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE, updatable: false)]
-    #[Groups(['observation:read', 'visit:read'])] 
+    #[Groups(['observation:read', 'visit:read'])]
     private ?\DateTimeImmutable $createdAt = null;
 
     #[ORM\Column(type: Types::DATETIME_MUTABLE)] // Mutable car peut être ajustée si besoin
     #[Groups(['observation:read', 'observation:write', 'visit:read', 'flock:read'])] // 'write' autorisé !
     private ?\DateTimeInterface $observedAt = null;
+
+    #[ORM\OneToMany(mappedBy: 'observation', targetEntity: ObservationPhoto::class, cascade: ['persist', 'remove'])]
+    #[Groups(['observation:read'])]
+    private Collection $photos;
 
     #[Groups(['observation:read', 'visit:read'])]
     #[SerializedName('hasInventory')]
@@ -125,7 +131,7 @@ class Observation
     {
         // Le serveur marque toujours l'heure de réception
         $this->createdAt = new \DateTimeImmutable();
-        
+
         // Si le mobile n'a pas envoyé de date (ex: bug), on met la date serveur par défaut
         if ($this->observedAt === null) {
             $this->observedAt = new \DateTime();
@@ -136,25 +142,64 @@ class Observation
     {
         $this->detectedProblems = new ArrayCollection();
         $this->resolvedProblems = new ArrayCollection();
+        $this->photos = new ArrayCollection();
         // Si vous aviez déjà un constructeur, ajoutez juste la ligne ci-dessus dedans.
     }
 
-    public function getId(): ?int { return $this->id; }
+    public function getId(): ?int
+    {
+        return $this->id;
+    }
 
-    public function getVisit(): ?Visit { return $this->visit; }
-    public function setVisit(?Visit $visit): self { $this->visit = $visit; return $this; }
+    public function getVisit(): ?Visit
+    {
+        return $this->visit;
+    }
+    public function setVisit(?Visit $visit): self
+    {
+        $this->visit = $visit;
+        return $this;
+    }
 
-    public function getFlock(): ?Flock { return $this->flock; }
-    public function setFlock(?Flock $flock): self { $this->flock = $flock; return $this; }
+    public function getFlock(): ?Flock
+    {
+        return $this->flock;
+    }
+    public function setFlock(?Flock $flock): self
+    {
+        $this->flock = $flock;
+        return $this;
+    }
 
-    public function getConcerns(): ?string { return $this->concerns; }
-    public function setConcerns(?string $concerns): self { $this->concerns = $concerns; return $this; }
+    public function getConcerns(): ?string
+    {
+        return $this->concerns;
+    }
+    public function setConcerns(?string $concerns): self
+    {
+        $this->concerns = $concerns;
+        return $this;
+    }
 
-    public function getObservation(): ?string { return $this->observation; }
-    public function setObservation(?string $observation): self { $this->observation = $observation; return $this; }
+    public function getObservation(): ?string
+    {
+        return $this->observation;
+    }
+    public function setObservation(?string $observation): self
+    {
+        $this->observation = $observation;
+        return $this;
+    }
 
-    public function getRecommendations(): ?string { return $this->recommendations; }
-    public function setRecommendations(?string $recommendations): self { $this->recommendations = $recommendations; return $this; }
+    public function getRecommendations(): ?string
+    {
+        return $this->recommendations;
+    }
+    public function setRecommendations(?string $recommendations): self
+    {
+        $this->recommendations = $recommendations;
+        return $this;
+    }
 
     /**
      * @return Collection<int, Problem>
@@ -185,7 +230,10 @@ class Observation
     }
 
     /** @return Collection<int, Problem> */
-    public function getResolvedProblems(): Collection { return $this->resolvedProblems; }
+    public function getResolvedProblems(): Collection
+    {
+        return $this->resolvedProblems;
+    }
 
     public function addResolvedProblem(Problem $problem): self
     {
@@ -205,17 +253,76 @@ class Observation
         }
         return $this;
     }
-    public function getGeneralComment(): ?string { return $this->generalComment; }
-    public function setGeneralComment(?string $generalComment): self { $this->generalComment = $generalComment; return $this; }
+    public function getGeneralComment(): ?string
+    {
+        return $this->generalComment;
+    }
+    public function setGeneralComment(?string $generalComment): self
+    {
+        $this->generalComment = $generalComment;
+        return $this;
+    }
 
-    public function getData(): array { return $this->data; }
-    public function setData(array $data): self { $this->data = $data; return $this; }
+    public function getData(): array
+    {
+        return $this->data;
+    }
+    public function setData(array $data): self
+    {
+        $this->data = $data;
+        return $this;
+    }
 
-    public function getCreatedAt(): ?\DateTimeImmutable { return $this->createdAt; }
-    public function getObservedAt(): ?\DateTimeInterface { return $this->observedAt; }
-    public function setObservedAt(\DateTimeInterface $observedAt): self { $this->observedAt = $observedAt; return $this; }
+    public function getCreatedAt(): ?\DateTimeImmutable
+    {
+        return $this->createdAt;
+    }
+    public function getObservedAt(): ?\DateTimeInterface
+    {
+        return $this->observedAt;
+    }
+    public function setObservedAt(\DateTimeInterface $observedAt): self
+    {
+        $this->observedAt = $observedAt;
+        return $this;
+    }
+
+    public function getPhotos(): Collection
+    {
+        return $this->photos;
+    }
+    #[SerializedName('newPhotos')]
+    #[Groups(['observation:write'])]
+    public function setNewPhotos(array $newPhotos): self
+    {
+        foreach ($newPhotos as $photoData) {
+            // $photoData = ['content' => 'base64string...', 'filename' => 'photo.jpg']
+            if (empty($photoData['content'])) continue;
+
+            // Décodage du Base64
+            $data = explode(',', $photoData['content']);
+            $content = base64_decode(end($data));
+
+            // Génération nom de fichier unique
+            $filename = uniqid('obs_') . '.jpg';
+            $path = 'uploads/observations/' . $filename; // Assurez-vous que ce dossier existe dans /public
+
+            // Écriture du fichier sur le disque
+            // Note: En prod, utilisez un Service Symfony, ici on fait simple pour l'exemple
+            file_put_contents($path, $content);
+
+            // Création de l'entité Photo
+            $photo = new ObservationPhoto();
+            $photo->contentUrl = '/uploads/observations/' . $filename;
+            $photo->setObservation($this);
+
+            $this->photos->add($photo);
+        }
+        return $this;
+    }
+
     public function __toString(): string
     {
-        return 'Observation #' . $this->id. ' - Bande: ' . ($this->flock ? $this->flock->getName() : 'N/A') . ' - Visite #' . ($this->visit ? $this->visit->getId() : 'N/A');
+        return 'Observation #' . $this->id . ' - Bande: ' . ($this->flock ? $this->flock->getName() : 'N/A') . ' - Visite #' . ($this->visit ? $this->visit->getId() : 'N/A');
     }
 }
