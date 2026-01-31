@@ -5,6 +5,7 @@ import Select from 'react-select';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCustomers, CustomerOption } from '@/hooks/useCustomers';
 import { useSync } from '@/providers/SyncProvider';
+import toast from "react-hot-toast";
 
 // --- TYPES ---
 
@@ -208,7 +209,15 @@ export default function FlocksPage() {
 
     const handleEdit = (flock: Flock) => {
         if (flock.__isPending) {
-            alert("Veuillez attendre la synchronisation avant de modifier ce lot.");
+            toast("Veuillez attendre la synchronisation avant de modifier ce lot.", {
+                icon: "⚠️",
+                style: {
+                    borderRadius: "10px",
+                    background: "#f59e0b", // Orange pour avertissement
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             return;
         }
         setEditingFlock(flock);
@@ -235,7 +244,15 @@ export default function FlocksPage() {
         if (!selectedCustomerOption) return;
         
         if (!name || !startDate || !subjectCount || !selectedSpeculation) {
-            alert("Veuillez remplir les champs obligatoires.");
+            toast("Veuillez remplir les champs obligatoires.", {
+                icon: "⚠️",
+                style: {
+                    borderRadius: "10px",
+                    background: "#f59e0b", // Orange pour avertissement
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             return;
         }
 
@@ -258,7 +275,15 @@ export default function FlocksPage() {
         // 1. DÉTECTION OFFLINE -> SAUVEGARDE AUTO
         if (!navigator.onLine) {
             addToQueue({ url, method: method as any, body: payload });
-            alert("🌐 Hors ligne : Action enregistrée et mise en file d'attente.");
+            toast("🌐 Hors ligne : Action enregistrée et mise en file d'attente.", {
+                icon: "🌐",
+                style: {
+                    borderRadius: "10px",
+                    background: "#3b82f6", // Bleu pour info
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             resetForm();
             return;
         }
@@ -285,11 +310,27 @@ export default function FlocksPage() {
         } catch (error: any) {
             console.error(error);
             if (error.status) {
-                alert(`⛔ Erreur (${error.status}): ${error.message}`);
+                toast(`⛔ Erreur (${error.status}): ${error.message}`, {
+                    icon: "⛔",
+                    style: {
+                        borderRadius: "10px",
+                        background: "#ef4444", // Rouge pour erreur
+                        color: "#fff",
+                    },
+                    duration: 4000,
+                });
                 setIsSubmitting(false); 
             } else {
                 addToQueue({ url, method: method as any, body: payload });
-                alert("⚠️ Connexion perdue. Action sauvegardée en mode hors-ligne.");
+                toast("⚠️ Connexion perdue. Action sauvegardée en mode hors-ligne.", {
+                    icon: "⚠️",
+                    style: {
+                        borderRadius: "10px",
+                        background: "#f59e0b", // Orange pour avertissement
+                        color: "#fff",
+                    },
+                    duration: 4000,
+                });
                 resetForm();
             }
         }
@@ -298,7 +339,15 @@ export default function FlocksPage() {
     // ✅ GESTION ACTIONS SÉCURISÉES
     const handleAction = async (action: 'DELETE' | 'CLOSE' | 'REOPEN', flock: Flock) => {
         if (flock.__isPending) {
-            alert("Action impossible : synchronisation en attente.");
+            toast("Action impossible : synchronisation en attente.", {
+                icon: "⚠️",
+                style: {
+                    borderRadius: "10px",
+                    background: "#f59e0b", // Orange pour avertissement
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             return;
         }
         if (!confirm("Êtes-vous sûr de vouloir effectuer cette action ?")) return;
@@ -319,7 +368,15 @@ export default function FlocksPage() {
         // 1. OFFLINE
         if (!navigator.onLine) {
             addToQueue({ url, method: method as any, body });
-            alert("🌐 Hors ligne : Action mise en file d'attente.");
+            toast("🌐 Hors ligne : Action mise en file d'attente.", {
+                icon: "🌐",
+                style: {
+                    borderRadius: "10px",
+                    background: "#3b82f6", // Bleu pour info
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             return;
         }
 
@@ -341,10 +398,26 @@ export default function FlocksPage() {
             queryClient.invalidateQueries({ queryKey: ['flocks_v2', selectedCustomerOption?.value] });
         } catch (e: any) {
             if (e.status) {
-                alert(`⛔ Impossible d'effectuer l'action (${e.status}): ${e.message}`);
+                toast(`⛔ Impossible d'effectuer l'action (${e.status}): ${e.message}`, {
+                    icon: "⛔",
+                    style: {
+                        borderRadius: "10px",
+                        background: "#ef4444", // Rouge pour erreur
+                        color: "#fff",
+                    },
+                    duration: 4000,
+                });
             } else {
                 addToQueue({ url, method: method as any, body });
-                alert("⚠️ Connexion perdue. Action mise en file d'attente.");
+                toast("⚠️ Connexion perdue. Action mise en file d'attente.", {
+                    icon: "⚠️",
+                    style: {
+                        borderRadius: "10px",
+                        background: "#f59e0b", // Orange pour avertissement
+                        color: "#fff",
+                    },
+                    duration: 4000,
+                });
             }
         }
     };

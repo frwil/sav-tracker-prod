@@ -5,6 +5,7 @@ import Select from 'react-select';
 import { useSync } from '@/providers/SyncProvider';
 import { useCustomers, CustomerOption } from '@/hooks/useCustomers';
 import { API_URL } from '../shared';
+import toast from "react-hot-toast";
 
 // --- FORMULAIRE BÂTIMENT (Structure unifiée avec buildings/page.tsx) ---
 export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onCancel }: any) => {
@@ -37,7 +38,7 @@ export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onC
         e.preventDefault();
         
         if (!formData.name || !formData.surface || !formData.customer) {
-            alert("Merci de remplir le nom, la surface et le client.");
+            toast.error("Merci de remplir le nom, la surface et le client.");
             return;
         }
 
@@ -54,7 +55,15 @@ export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onC
         // 1. Détection Offline Navigateur -> Sauvegarde Auto
         if (!navigator.onLine) {
             addToQueue({ url, method: 'POST', body });
-            alert("🌐 Hors ligne : Bâtiment sauvegardé et en attente de synchro.");
+            toast("🌐 Hors ligne : Bâtiment sauvegardé et en attente de synchro.",{
+                icon: "🌐",
+                style: {
+                    borderRadius: "10px",
+                    background: "#3b82f6", // Bleu pour info
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             onSuccess();
             return;
         }
@@ -80,11 +89,19 @@ export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onC
             // ✅ Gestion stricte des erreurs
             if (e.status) {
                 // CAS A : Erreur API (400, 422, 500...) -> ON REJETTE (Pas de sauvegarde)
-                alert(`⛔ Impossible de créer le bâtiment (${e.status}): ${e.message}`);
+                toast.error(`⛔ Impossible de créer le bâtiment (${e.status}): ${e.message}`);
             } else {
                 // CAS B : Erreur Réseau (Fetch failed) -> SAUVEGARDE AUTO
                 addToQueue({ url, method: 'POST', body });
-                alert("⚠️ Connexion instable. Bâtiment sauvegardé en mode hors-ligne.");
+                toast("⚠️ Connexion instable. Bâtiment sauvegardé en mode hors-ligne.",{
+                    icon: "⚠️",
+                    style: {
+                        borderRadius: "10px",
+                        background: "#f59e0b", // Orange pour avertissement
+                        color: "#fff",
+                    },
+                    duration: 4000,
+                });
                 onSuccess();
             }
         } finally { 
@@ -180,7 +197,7 @@ export const NewFlockForm = ({
         e.preventDefault();
         
         if (!formData.speculation || !formData.subjectCount) {
-            alert("Veuillez remplir les champs obligatoires (Effectif, Spéculation).");
+            toast.error("Veuillez remplir les champs obligatoires (Effectif, Spéculation).");
             return;
         }
 
@@ -200,7 +217,15 @@ export const NewFlockForm = ({
         // 1. Offline Check -> Auto Save
         if (!navigator.onLine) {
             addToQueue({ url, method: 'POST', body });
-            alert("🌐 Hors ligne : Bande sauvegardée et en attente de synchro.");
+            toast("🌐 Hors ligne : Bande sauvegardée et en attente de synchro.",{
+                icon: "🌐",
+                style: {
+                    borderRadius: "10px",
+                    background: "#3b82f6", // Bleu pour info
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             onSuccess();
             return;
         }
@@ -225,11 +250,19 @@ export const NewFlockForm = ({
             // ✅ 2. Gestion stricte des erreurs
             if (e.status) {
                 // Erreur serveur/validation -> Rejet (Pas de sauvegarde)
-                alert(`⛔ Erreur lors de la création (${e.status}): ${e.message}`);
+                toast.error(`⛔ Erreur lors de la création (${e.status}): ${e.message}`);
             } else {
                 // Erreur Connexion -> Sauvegarde Auto
                 addToQueue({ url, method: 'POST', body });
-                alert("⚠️ Connexion perdue. Bande sauvegardée localement.");
+                toast("⚠️ Connexion perdue. Bande sauvegardée localement.",{
+                    icon: "⚠️",
+                    style: {
+                        borderRadius: "10px",
+                        background: "#f59e0b", // Orange pour avertissement
+                        color: "#fff",
+                    },
+                    duration: 4000,
+                });
                 onSuccess();
             }
         } finally { 

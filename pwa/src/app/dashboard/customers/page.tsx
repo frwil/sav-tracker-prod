@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSync } from '@/providers/SyncProvider';
+import toast from "react-hot-toast";
 
 // --- TYPES ---
 
@@ -141,7 +142,15 @@ export default function CustomersPage() {
 
     const handleEdit = (customer: Customer) => {
         if (customer.__isPending) {
-            alert("Veuillez attendre la synchronisation avant de modifier ce client.");
+            toast("Veuillez attendre la synchronisation avant de modifier ce client.", {
+                icon: "⚠️",
+                style: {
+                    borderRadius: "10px",
+                    background: "#f59e0b", // Orange pour avertissement
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             return;
         }
         setEditingCustomer(customer);
@@ -164,7 +173,15 @@ export default function CustomersPage() {
         e.preventDefault();
         
         if (!formData.name || !formData.zone) {
-            alert("Le nom et la zone sont obligatoires.");
+            toast("Le nom et la zone sont obligatoires.", {
+                icon: "⚠️",
+                style: {
+                    borderRadius: "10px",
+                    background: "#f59e0b", // Orange pour avertissement
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             return;
         }
 
@@ -185,7 +202,15 @@ export default function CustomersPage() {
         // 1. OFFLINE -> SAUVEGARDE AUTO
         if (!navigator.onLine) {
             addToQueue({ url, method: method as any, body: payload });
-            alert("🌐 Hors ligne : Action enregistrée et mise en file d'attente.");
+            toast("🌐 Hors ligne : Action enregistrée et mise en file d'attente.", {
+                icon: "🌐",
+                style: {
+                    borderRadius: "10px",
+                    background: "#3b82f6", // Bleu pour info
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             handleClose();
             return;
         }
@@ -214,10 +239,18 @@ export default function CustomersPage() {
             // En cas d'erreur (réseau ou autre), on met en queue par sécurité si ce n'est pas une erreur 4xx
             if (!e.status || e.status >= 500) {
                 addToQueue({ url, method: method as any, body: payload });
-                alert("⚠️ Connexion instable. Action sauvegardée en mode hors-ligne.");
+                toast("⚠️ Connexion instable. Action sauvegardée en mode hors-ligne.", {
+                    icon: "⚠️",
+                    style: {
+                        borderRadius: "10px",
+                        background: "#f59e0b", // Orange pour avertissement
+                        color: "#fff",
+                    },
+                    duration: 4000,
+                });
                 handleClose();
             } else {
-                alert(`⛔ Erreur (${e.status}): ${e.message}`);
+                toast.error(`⛔ Erreur (${e.status}): ${e.message}`);
                 setIsSubmitting(false);
             }
         }

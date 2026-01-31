@@ -1,13 +1,22 @@
 // pwa/src/providers/SyncProvider.tsx
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, {
+    createContext,
+    useContext,
+    useEffect,
+    useState,
+    useCallback,
+} from "react";
 import { syncQueueStorage } from "../services/storage"; // ✅ Import IndexedDB
 import { SyncTask } from "@/types/SyncTask"; // ✅ Utilisation de votre type existant
+import toast from "react-hot-toast";
 
 interface SyncContextType {
     queue: SyncTask[];
-    addToQueue: (task: Omit<SyncTask, "id" | "timestamp" | "retryCount">) => void;
+    addToQueue: (
+        task: Omit<SyncTask, "id" | "timestamp" | "retryCount">,
+    ) => void;
     isSyncing: boolean;
 }
 
@@ -19,7 +28,11 @@ const SyncContext = createContext<SyncContextType>({
 
 export const useSync = () => useContext(SyncContext);
 
-export default function SyncProvider({ children }: { children: React.ReactNode }) {
+export default function SyncProvider({
+    children,
+}: {
+    children: React.ReactNode;
+}) {
     const [queue, setQueue] = useState<SyncTask[]>([]);
     const [isSyncing, setIsSyncing] = useState(false);
     const [isLoaded, setIsLoaded] = useState(false); // État pour attendre le chargement de la DB
@@ -29,10 +42,13 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
     useEffect(() => {
         const loadQueue = async () => {
             try {
-                const savedQueue = await syncQueueStorage.getItem<SyncTask[]>("queue");
+                const savedQueue =
+                    await syncQueueStorage.getItem<SyncTask[]>("queue");
                 if (savedQueue && Array.isArray(savedQueue)) {
                     setQueue(savedQueue);
-                    console.log(`📂 ${savedQueue.length} tâches chargées depuis IndexedDB`);
+                    console.log(
+                        `📂 ${savedQueue.length} tâches chargées depuis IndexedDB`,
+                    );
                 }
             } catch (e) {
                 console.error("Erreur lecture IndexedDB", e);
@@ -47,9 +63,9 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
     useEffect(() => {
         // On n'écrit que si le chargement initial est terminé pour ne pas écraser la DB
         if (isLoaded) {
-            syncQueueStorage.setItem("queue", queue).catch(e => 
-                console.error("Erreur écriture IndexedDB", e)
-            );
+            syncQueueStorage
+                .setItem("queue", queue)
+                .catch((e) => console.error("Erreur écriture IndexedDB", e));
         }
     }, [queue, isLoaded]);
 
@@ -57,7 +73,11 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
      * 🔴 LOG DE L'ERREUR FATALE (AuditLog)
      * Envoie un rapport au serveur si une requête est rejetée (400, 500)
      */
-    const logSyncError = async (item: SyncTask, errorMsg: string, token: string) => {
+    const logSyncError = async (
+        item: SyncTask,
+        errorMsg: string,
+        token: string,
+    ) => {
         try {
             await fetch(`${API_URL}/audit_logs`, {
                 method: "POST",
@@ -72,8 +92,23 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
                     requestPayload: item.body,
                 }),
             });
-            console.warn(`📝 Incident enregistré dans AuditLog pour l'item ${item.id}`);
+            toast(
+                `📝 Incident enregistré dans AuditLog pour l'item ${item.id}`,
+                {
+                    icon: "📡",
+                    style: {
+                        borderRadius: "10px",
+                        background: "#F59E0B", // Orange pour signaler l'attente
+                        color: "#fff",
+                    },
+                    duration: 5000,
+                },
+            );
+            console.warn(
+                `📝 Incident enregistré dans AuditLog pour l'item ${item.id}`,
+            );
         } catch (e) {
+            toast.error(`❌ Impossible d'envoyer le log d'erreur pour l'item ${item.id}`);
             console.error("Impossible d'envoyer le log d'erreur", e);
         }
     };
@@ -88,20 +123,24 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
         const token = localStorage.getItem("sav_token");
 
         if (!token) {
+            toast.error("❌ Impossible de synchroniser : pas de token d'authentification.");
             console.warn("Sync annulée : Pas de token.");
             setIsSyncing(false);
             return;
         }
 
         const processedIds: string[] = [];
-        const currentQueue = [...queue]; 
+        const currentQueue = [...queue];
 
         for (const item of currentQueue) {
             try {
                 const res = await fetch(`${API_URL}${item.url}`, {
                     method: item.method,
                     headers: {
-                        "Content-Type": item.method === "PATCH" ? "application/merge-patch+json" : "application/json",
+                        "Content-Type":
+                            item.method === "PATCH"
+                                ? "application/merge-patch+json"
+                                : "application/json",
                         Authorization: `Bearer ${token}`,
                     },
                     body: JSON.stringify(item.body),
@@ -111,27 +150,41 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
                 if (res.ok) {
                     console.log(`✅ Synchro réussie : ${item.url}`);
                     processedIds.push(item.id);
-                } 
+                }
                 // CAS B : ERREUR FATALE API (400, 500...)
                 else {
                     const errorJson = await res.json().catch(() => ({}));
-                    const errorMsg = errorJson["hydra:description"] || errorJson.detail || `Erreur HTTP ${res.status}`;
-                    console.error(`❌ Erreur Fatale API (${res.status}) sur ${item.url}.`);
-                    
-                    await logSyncError(item, `Status ${res.status}: ${errorMsg}`, token);
+                    const errorMsg =
+                        errorJson["hydra:description"] ||
+                        errorJson.detail ||
+                        `Erreur HTTP ${res.status}`;
+                        toast.error(`❌ Erreur synchronisation ${item.url} : ${errorMsg}`);
+                    console.error(
+                        `❌ Erreur Fatale API (${res.status}) sur ${item.url}.`,
+                    );
+
+                    await logSyncError(
+                        item,
+                        `Status ${res.status}: ${errorMsg}`,
+                        token,
+                    );
                     processedIds.push(item.id); // On supprime pour ne pas bloquer la file
                 }
-
             } catch (error) {
                 // CAS C : ERREUR RÉSEAU
-                console.warn(`🌐 Erreur Réseau sur ${item.url}. Pause de la synchronisation.`);
+                toast.error(`🌐 Erreur Réseau sur ${item.url}. Synchronisation en pause.`);
+                console.warn(
+                    `🌐 Erreur Réseau sur ${item.url}. Pause de la synchronisation.`,
+                );
                 break; // ON ARRÊTE TOUT et on attend le retour du réseau
             }
         }
 
         // Mise à jour de la file (suppression des éléments traités)
         if (processedIds.length > 0) {
-            setQueue((prevQueue) => prevQueue.filter((task) => !processedIds.includes(task.id)));
+            setQueue((prevQueue) =>
+                prevQueue.filter((task) => !processedIds.includes(task.id)),
+            );
         }
 
         setIsSyncing(false);
@@ -140,6 +193,7 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
     // 4. DÉCLENCHEURS
     useEffect(() => {
         const handleOnline = () => {
+            toast.success("🟢 Connexion rétablie !");
             console.log("🟢 Connexion rétablie !");
             processQueue();
         };
@@ -155,15 +209,28 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
     }, [processQueue, queue.length, isLoaded]);
 
     // 5. FONCTION D'AJOUT
-    const addToQueue = (taskData: Omit<SyncTask, "id" | "timestamp" | "retryCount">) => {
+    const addToQueue = (
+        taskData: Omit<SyncTask, "id" | "timestamp" | "retryCount">,
+    ) => {
         const newTask: SyncTask = {
             ...taskData,
-            id: crypto.randomUUID ? crypto.randomUUID() : `task-${Date.now()}-${Math.random()}`,
+            id: crypto.randomUUID
+                ? crypto.randomUUID()
+                : `task-${Date.now()}-${Math.random()}`,
             timestamp: Date.now(),
             retryCount: 0,
         };
-        
+
         setQueue((prev) => [...prev, newTask]);
+        toast("💾 Action sauvegardée localement pour synchronisation.", {
+            icon: "💾",
+            style: {
+                borderRadius: "10px",
+                background: "#e4c61c", // Vert pour succès
+                color: "#000",
+            },
+            duration: 3000,
+        });
         console.log("💾 Action sauvegardée localement (IndexedDB)");
 
         if (navigator.onLine) {
@@ -178,13 +245,15 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
             {/* INDICATEUR VISUEL DISCRET */}
             {queue.length > 0 && (
                 <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2 animate-in fade-in slide-in-from-bottom-4">
-                    <div className={`px-4 py-2 rounded-full shadow-lg font-bold text-xs flex items-center gap-2 transition-colors ${
-                        isSyncing 
-                            ? "bg-blue-600 text-white" 
-                            : navigator.onLine 
-                                ? "bg-yellow-400 text-yellow-900" 
-                                : "bg-gray-800 text-white"
-                    }`}>
+                    <div
+                        className={`px-4 py-2 rounded-full shadow-lg font-bold text-xs flex items-center gap-2 transition-colors ${
+                            isSyncing
+                                ? "bg-blue-600 text-white"
+                                : navigator.onLine
+                                  ? "bg-yellow-400 text-yellow-900"
+                                  : "bg-gray-800 text-white"
+                        }`}
+                    >
                         {isSyncing ? (
                             <>🔄 Synchronisation...</>
                         ) : navigator.onLine ? (

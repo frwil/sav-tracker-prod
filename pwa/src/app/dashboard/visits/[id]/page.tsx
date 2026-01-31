@@ -7,6 +7,7 @@ import { useSync } from "@/providers/SyncProvider"; // ✅ Import Sync
 import { API_URL, Visit } from "./shared";
 import { NewBuildingForm, NewFlockForm } from "./components/Forms";
 import { FlockItem } from "./components/FlockItem";
+import toast from "react-hot-toast";
 
 export default function VisitDetailsPage({
     params,
@@ -199,7 +200,15 @@ export default function VisitDetailsPage({
     const handleCloseVisit = async () => {
         if (!visit) return;
         if (!hasAtLeastOneObservation()) {
-            alert("⚠️ IMPOSSIBLE DE TERMINER !\n\nVous devez saisir au moins une observation pour valider la visite.");
+            toast("⚠️ IMPOSSIBLE DE TERMINER !\n\nVous devez saisir au moins une observation pour valider la visite.",{
+                icon: "⚠️",
+                style: {
+                    borderRadius: "10px",
+                    background: "#f59e0b", // Orange pour avertissement
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             return;
         }
         if (!confirm("Voulez-vous vraiment clôturer cette visite ?\nCette action est irréversible.")) return;
@@ -211,7 +220,15 @@ export default function VisitDetailsPage({
         // ✅ Gestion Offline pour la clôture
         if (!navigator.onLine) {
             addToQueue({ url, method, body });
-            alert("🌐 Hors ligne : La clôture sera synchronisée dès le retour de la connexion.");
+            toast("🌐 Hors ligne : La clôture sera synchronisée dès le retour de la connexion.",{
+                icon: "🌐",
+                style: {
+                    borderRadius: "10px",
+                    background: "#3b82f6", // Bleu pour info
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             router.push("/dashboard/visits");
             return;
         }
@@ -227,10 +244,10 @@ export default function VisitDetailsPage({
                 body: JSON.stringify(body),
             });
             fetchVisit();
-            alert("Visite clôturée avec succès.");
+            toast.success("Visite clôturée avec succès.");
             router.push("/dashboard/visits");
         } catch (e) {
-            alert("Erreur lors de la clôture.");
+            toast.error("Erreur lors de la clôture.");
         }
     };
 

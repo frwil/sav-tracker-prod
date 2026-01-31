@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
 
 // Liste des pages critiques à rendre disponibles hors ligne
 const CRITICAL_ROUTES = [
@@ -24,7 +25,7 @@ export default function CacheWarmer() {
             CRITICAL_ROUTES.forEach((route) => {
                 router.prefetch(route);
             });
-            
+            toast.success("✅ Pré-chargement des vues critiques terminé.");
             console.log(`✅ ${CRITICAL_ROUTES.length} vues pré-chargées en cache.`);
         }, 3000); // 3 secondes après le montage
 

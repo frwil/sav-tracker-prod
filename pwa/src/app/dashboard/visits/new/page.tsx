@@ -6,6 +6,7 @@ import Select from 'react-select';
 import Link from 'next/link';
 import { useCustomers, CustomerOption } from '@/hooks/useCustomers';
 import { useSync } from '@/providers/SyncProvider';
+import toast from "react-hot-toast";
 
 // Types
 interface Checkpoint {
@@ -212,7 +213,15 @@ export default function NewVisitPage() {
 
         if (!navigator.onLine) {
             addToQueue({ url, method, body: payload });
-            alert("🌐 Mode Hors-Ligne : Visite créée localement.");
+            toast("🌐 Mode Hors-Ligne : Visite créée localement.",{
+                icon: "🌐",
+                style: {
+                    borderRadius: "10px",
+                    background: "#3b82f6", // Bleu pour info
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             router.push('/dashboard/visits');
             return;
         }
@@ -236,7 +245,15 @@ export default function NewVisitPage() {
         } catch (err: any) {
             console.error(err);
             addToQueue({ url, method, body: payload });
-            alert("⚠️ Problème connexion. Visite sauvegardée hors-ligne.");
+            toast("⚠️ Problème connexion. Visite sauvegardée hors-ligne.",{
+                icon: "⚠️",
+                style: {
+                    borderRadius: "10px",
+                    background: "#f59e0b", // Orange pour avertissement
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             router.push('/dashboard/visits');
         }
     };

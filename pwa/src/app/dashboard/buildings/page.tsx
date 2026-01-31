@@ -5,6 +5,7 @@ import Select from 'react-select';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCustomers, CustomerOption } from '@/hooks/useCustomers';
 import { useSync } from '@/providers/SyncProvider';
+import toast from "react-hot-toast";
 
 // --- TYPES ---
 
@@ -137,7 +138,15 @@ export default function BuildingsPage() {
 
     const handleEdit = (building: Building) => {
         if (building.__isPending) {
-            alert("Veuillez attendre la synchronisation avant de modifier ce bâtiment.");
+            toast("Veuillez attendre la synchronisation avant de modifier ce bâtiment.", {
+                icon: "⚠️",
+                style: {
+                    borderRadius: "10px",
+                    background: "#f59e0b", // Orange pour avertissement
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             return;
         }
         setEditingBuilding(building);
@@ -160,7 +169,15 @@ export default function BuildingsPage() {
         e.preventDefault();
         
         if (!formData.name || !formData.surface || !formData.customer) {
-            alert("Merci de remplir le nom, la surface et le client.");
+            toast("Merci de remplir le nom, la surface et le client.", {
+                icon: "⚠️",
+                style: {
+                    borderRadius: "10px",
+                    background: "#f59e0b", // Orange pour avertissement
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             return;
         }
 
@@ -180,7 +197,15 @@ export default function BuildingsPage() {
         // 1. OFFLINE -> SAUVEGARDE AUTO
         if (!navigator.onLine) {
             addToQueue({ url, method: method as any, body: payload });
-            alert("🌐 Hors ligne : Action enregistrée et mise en file d'attente.");
+            toast("🌐 Hors ligne : Action enregistrée et mise en file d'attente.", {
+                icon: "🌐",
+                style: {
+                    borderRadius: "10px",
+                    background: "#3b82f6", // Bleu pour info
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             handleClose();
             return;
         }
@@ -207,12 +232,20 @@ export default function BuildingsPage() {
         } catch (e: any) {
             console.error(e);
             if (e.status) {
-                alert(`⛔ Erreur (${e.status}): ${e.message}`);
+                toast.error(`⛔ Erreur (${e.status}): ${e.message}`);
                 setIsSubmitting(false);
             } else {
                 // Erreur réseau -> Queue
                 addToQueue({ url, method: method as any, body: payload });
-                alert("⚠️ Connexion perdue. Action sauvegardée en mode hors-ligne.");
+                toast("⚠️ Connexion perdue. Action sauvegardée en mode hors-ligne.", {
+                    icon: "⚠️",
+                    style: {
+                        borderRadius: "10px",
+                        background: "#f59e0b", // Orange pour avertissement
+                        color: "#fff",
+                    },
+                    duration: 4000,
+                });
                 handleClose();
             }
         }

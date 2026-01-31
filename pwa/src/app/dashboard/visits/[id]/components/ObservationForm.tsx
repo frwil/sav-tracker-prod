@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSync } from "@/providers/SyncProvider";
 import { compressImage } from "@/utils/imageCompressor";
+import toast from "react-hot-toast";
 import {
     API_URL,
     ProphylaxisTask,
@@ -394,11 +395,12 @@ export const ObservationForm = ({
 
         // --- 1. VALIDATIONS ---
         if (!token && navigator.onLine) {
-            alert("⚠️ Session expirée. Veuillez vous reconnecter.");
+            toast.error("⚠️ Session expirée. Veuillez vous reconnecter.");
+            //alert("⚠️ Session expirée. Veuillez vous reconnecter.");
             return;
         }
         if (!feedBrand || feedBrand.trim() === "") {
-            alert("⚠️ Précisez le type ou la marque d'aliment utilisé.");
+            toast.error("⚠️ Précisez le type ou la marque d'aliment utilisé.");
             return;
         }
 
@@ -439,7 +441,15 @@ export const ObservationForm = ({
         // --- 3. MODE HORS LIGNE ---
         if (!navigator.onLine) {
             addToQueue({ url, method, body });
-            alert("🌐 Hors ligne : Mis en file d'attente.");
+            toast("🌐 Hors ligne : Mis en file d'attente.",{
+                icon: "🌐",
+                style: {
+                    borderRadius: "10px",
+                    background: "#3b82f6", // Bleu pour info
+                    color: "#fff",
+                },
+                duration: 4000,
+            });
             onSuccess();
             return;
         }
@@ -522,12 +532,18 @@ export const ObservationForm = ({
 
             if (isNetworkError) {
                 addToQueue({ url, method, body });
-                alert(
-                    "🌐 Réseau indisponible. Données sauvegardées en local pour synchronisation automatique.",
-                );
+                toast("🌐 Réseau indisponible. Données sauvegardées en local pour synchronisation automatique.", {
+                    icon: "🌐",
+                    style: {
+                        borderRadius: "10px",
+                        background: "#3b82f6", // Bleu pour info
+                        color: "#fff",
+                    },
+                    duration: 4000,
+                });
                 onSuccess();
             } else {
-                alert(`⚠️ L'enregistrement a échoué : ${e.message}`);
+                toast.error(`⚠️ L'enregistrement a échoué : ${e.message}`);
             }
         } finally {
             setLoading(false);
@@ -537,7 +553,7 @@ export const ObservationForm = ({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (data.poidsMoyen <= 0) {
-            alert("⛔ Poids invalide");
+            toast.error("⛔ Poids invalide");
             return;
         }
         if (previousWeight > 0 && data.poidsMoyen < previousWeight) {
@@ -564,7 +580,7 @@ export const ObservationForm = ({
                     { content: compressedBase64, filename: file.name }
                 ]);
             } catch (err) {
-                alert("Erreur lors du traitement de l'image");
+                toast.error("Erreur lors du traitement de l'image");
                 console.error(err);
             } finally {
                 setIsCompressing(false);

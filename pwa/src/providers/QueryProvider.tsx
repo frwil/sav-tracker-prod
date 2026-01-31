@@ -7,6 +7,7 @@ import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persi
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useState } from "react";
 import { queryStorage } from "../services/storage"; // ✅ Import de notre stockage
+import { Toaster } from "react-hot-toast";
 
 export default function QueryProvider({ children }: { children: React.ReactNode }) {
     
@@ -61,6 +62,33 @@ export default function QueryProvider({ children }: { children: React.ReactNode 
             }}
         >
             {children}
+            <Toaster 
+                position="top-center"
+                toastOptions={{
+                    duration: 4000,
+                    style: {
+                        background: '#333',
+                        color: '#fff',
+                        borderRadius: '10px',
+                    },
+                    success: {
+                        style: {
+                            background: '#10B981', // Vert émeraude
+                            color: 'white',
+                        },
+                        iconTheme: {
+                            primary: 'white',
+                            secondary: '#10B981',
+                        },
+                    },
+                    error: {
+                        style: {
+                            background: '#EF4444', // Rouge
+                            color: 'white',
+                        },
+                    },
+                }}
+            />
             {/* Outils de dev (masqués par défaut) */}
             <ReactQueryDevtools initialIsOpen={false} />
         </PersistQueryClientProvider>
