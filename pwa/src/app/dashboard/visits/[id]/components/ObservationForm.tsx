@@ -15,7 +15,7 @@ import {
     generateExpertInsights,
     BenchmarkCard,
     Problem,
-    getFeedingStage, // Assurez-vous que cette fonction est bien dans shared.tsx
+    getFeedingStage,
 } from "../shared";
 
 export const ObservationForm = ({
@@ -87,25 +87,20 @@ export const ObservationForm = ({
 
     const isFirstObservation = historyList.length === 0;
 
-    // ✅ NOUVEAU : On force "Stable" si c'est la 1ère fois
     useEffect(() => {
         if (isFirstObservation && data.waterConsumptionIncrease !== "stable") {
             updateData("waterConsumptionIncrease", "stable");
         }
     }, [isFirstObservation, data.waterConsumptionIncrease]);
 
-    // --- 4. LOGIQUE MÉTIER AVANCÉE (Stages & Forecast) ---
-
-    // Étape Alimentaire (Ex: "Démarrage", "Croissance")
+    // --- 4. LOGIQUE MÉTIER AVANCÉE ---
     const currentStage = useMemo(
         () => getFeedingStage(flock.speculation.name, data.age),
         [flock.speculation.name, data.age],
     );
 
-    // Calculateur de besoin en sacs (Ravitaillement)
     const bagForecast = useMemo(() => {
         const remaining = flock.subjectCount - data.mortalite;
-        // Si consoTete est 0, on utilise une valeur par défaut de 100g pour éviter division par 0
         const dailyKg = (remaining * (data.consoTete || 100)) / 1000;
 
         let daysToNextPhase = 0;
@@ -115,7 +110,6 @@ export const ObservationForm = ({
             else if (data.age <= 35) daysToNextPhase = 35 - data.age;
         }
 
-        // On ne calcule que si on a des jours restants et une conso positive
         if (daysToNextPhase <= 0 || dailyKg <= 0)
             return { bags: 0, dailyKg: 0, days: 0 };
 
@@ -133,12 +127,11 @@ export const ObservationForm = ({
         specName,
     ]);
 
-    // --- 5. CHARGEMENT DONNÉES EXTERNES (Vaccins, Problèmes) ---
+    // --- 5. CHARGEMENT DONNÉES ---
     const [existingOpenProblems, setExistingOpenProblems] = useState<Problem[]>(
         [],
     );
 
-    // ... (Code de chargement des problèmes conservé à l'identique)
     useEffect(() => {
         const fetchProblems = async () => {
             if (!navigator.onLine) return;
@@ -325,7 +318,6 @@ export const ObservationForm = ({
     const updateData = (key: string, value: any) =>
         setData((prev: any) => ({ ...prev, [key]: value }));
 
-    // Calcul de l'âge auto
     useEffect(() => {
         if (initialData?.data?.age) return;
         if (flock.startDate) {
@@ -343,7 +335,6 @@ export const ObservationForm = ({
         }
     }, [flock.startDate, initialData, vaccines]);
 
-    // Feedbacks visuels
     const benchmark = calculateBenchmark(
         data.age,
         data.poidsMoyen,
@@ -356,13 +347,12 @@ export const ObservationForm = ({
     const unifFeedback = getFieldFeedback("uniformite", data.uniformite);
     const cvFeedback = getFieldFeedback("cv", data.cv);
 
-    // Insights en temps réel
     const liveInsights = useMemo(() => {
         const surface = building.surface || 1;
         const density = (flock.subjectCount - data.mortalite) / surface;
         const tempObs = {
             data: { ...data, feedStrategy, inventory, feedBrand },
-        }; // On inclut feedBrand pour l'insight de cohérence
+        };
         return generateExpertInsights(
             tempObs,
             flock,
@@ -382,7 +372,7 @@ export const ObservationForm = ({
         dueVaccines,
     ]);
 
-    // --- 9. SAUVEGARDE (Logique Robuste) ---
+    // --- 9. SAUVEGARDE ---
     const [showCorrectionModal, setShowCorrectionModal] = useState(false);
     const [correctionReason, setCorrectionReason] = useState("");
     const [previousWeight, setPreviousWeight] = useState(0);
@@ -393,10 +383,8 @@ export const ObservationForm = ({
     const saveObservation = async () => {
         const token = localStorage.getItem("sav_token");
 
-        // --- 1. VALIDATIONS ---
         if (!token && navigator.onLine) {
             toast.error("⚠️ Session expirée. Veuillez vous reconnecter.");
-            //alert("⚠️ Session expirée. Veuillez vous reconnecter.");
             return;
         }
         if (!feedBrand || feedBrand.trim() === "") {
@@ -404,8 +392,6 @@ export const ObservationForm = ({
             return;
         }
 
-        // --- 2. PRÉPARATION DES DONNÉES ---
-        // On sauvegarde l'état "au moment de la visite" dans le JSON data de l'observation
         const finalData = {
             ...data,
             feedStrategy,
@@ -429,7 +415,6 @@ export const ObservationForm = ({
             detectedProblems: newProblems,
             resolvedProblems: resolvedProblemIds,
             data: finalData,
-            // 👇 C'est ici qu'on envoie les photos au backend
             newPhotos: photos 
         };
 
@@ -438,14 +423,13 @@ export const ObservationForm = ({
             : `/observations`;
         const method = isEditMode ? "PATCH" : "POST";
 
-        // --- 3. MODE HORS LIGNE ---
         if (!navigator.onLine) {
             addToQueue({ url, method, body });
             toast("🌐 Hors ligne : Mis en file d'attente.",{
                 icon: "🌐",
                 style: {
                     borderRadius: "10px",
-                    background: "#3b82f6", // Bleu pour info
+                    background: "#3b82f6",
                     color: "#fff",
                 },
                 duration: 4000,
@@ -457,7 +441,6 @@ export const ObservationForm = ({
         setLoading(true);
 
         try {
-            // --- 4. ENREGISTREMENT DE L'OBSERVATION (CRITIQUE) ---
             const res = await fetch(`${API_URL}${url}`, {
                 method,
                 headers: {
@@ -481,9 +464,6 @@ export const ObservationForm = ({
 
             const savedObservation = await res.json();
 
-            // --- 5. GESTION DE L'HISTORIQUE ALIMENTAIRE ---
-            // On compare la saisie actuelle avec l'état précédent du Flock
-            // (flock.feedStrategy vient maintenant de votre getter virtuel PHP)
             const hasChanged =
                 !flock.feedStrategy ||
                 !flock.feedFormula ||
@@ -493,7 +473,6 @@ export const ObservationForm = ({
 
             if (hasChanged) {
                 try {
-                    // Création de l'entrée d'historique liée à l'observation
                     await fetch(`${API_URL}/flock_feed_histories`, {
                         method: "POST",
                         headers: {
@@ -502,7 +481,7 @@ export const ObservationForm = ({
                         },
                         body: JSON.stringify({
                             flock: flock["@id"],
-                            observation: savedObservation["@id"], // Lien de traçabilité
+                            observation: savedObservation["@id"],
                             previousStrategy:
                                 flock.feedStrategy || feedStrategy,
                             newStrategy: feedStrategy,
@@ -511,19 +490,13 @@ export const ObservationForm = ({
                         }),
                     });
                 } catch (historyError) {
-                    console.error(
-                        "Erreur non-bloquante (Historique):",
-                        historyError,
-                    );
-                    // On ne bloque pas l'utilisateur car l'observation est sauvée
+                    console.error("Erreur historique non-bloquante", historyError);
                 }
             }
 
-            // SUCCÈS TOTAL
             onSuccess();
         } catch (e: any) {
             console.error("Erreur Sauvegarde :", e);
-
             const isNetworkError =
                 !navigator.onLine ||
                 e instanceof TypeError ||
@@ -532,18 +505,14 @@ export const ObservationForm = ({
 
             if (isNetworkError) {
                 addToQueue({ url, method, body });
-                toast("🌐 Réseau indisponible. Données sauvegardées en local pour synchronisation automatique.", {
+                toast("🌐 Réseau indisponible. Sauvegardé en local.", {
                     icon: "🌐",
-                    style: {
-                        borderRadius: "10px",
-                        background: "#3b82f6", // Bleu pour info
-                        color: "#fff",
-                    },
+                    style: { borderRadius: "10px", background: "#3b82f6", color: "#fff" },
                     duration: 4000,
                 });
                 onSuccess();
             } else {
-                toast.error(`⚠️ L'enregistrement a échoué : ${e.message}`);
+                toast.error(`⚠️ Échec : ${e.message}`);
             }
         } finally {
             setLoading(false);
@@ -557,8 +526,7 @@ export const ObservationForm = ({
             return;
         }
         if (previousWeight > 0 && data.poidsMoyen < previousWeight) {
-            const drop =
-                ((previousWeight - data.poidsMoyen) / previousWeight) * 100;
+            const drop = ((previousWeight - data.poidsMoyen) / previousWeight) * 100;
             if (drop > 10) {
                 setShowCorrectionModal(true);
                 return;
@@ -592,13 +560,13 @@ export const ObservationForm = ({
         setPhotos(prev => prev.filter((_, i) => i !== index));
     };
 
-    // --- RENDER ---
+    // --- RENDER OPTIMISÉ MOBILE ---
     return (
-        <div className="relative space-y-4">
+        <div className="relative space-y-3 sm:space-y-4">
             {/* --- HEADER ÉTAPE & INFO --- */}
-            <div className="bg-indigo-900 p-4 rounded-xl text-white flex justify-between items-center shadow-lg">
+            <div className="bg-indigo-900 p-3 sm:p-4 rounded-xl text-white flex flex-col sm:flex-row justify-between items-start sm:items-center shadow-lg gap-2 sm:gap-0">
                 <div>
-                    <h2 className="text-2xl font-black uppercase tracking-tighter">
+                    <h2 className="text-xl sm:text-2xl font-black uppercase tracking-tighter">
                         {currentStage}
                     </h2>
                     <p className="text-xs opacity-70 flex gap-2">
@@ -607,11 +575,11 @@ export const ObservationForm = ({
                         <span>{specName}</span>
                     </p>
                 </div>
-                <div className="text-right bg-white/10 p-2 rounded-lg backdrop-blur-sm">
+                <div className="text-right bg-white/10 p-2 rounded-lg backdrop-blur-sm self-end sm:self-auto">
                     <p className="text-[10px] font-bold uppercase tracking-wider opacity-80">
                         Âge du lot
                     </p>
-                    <p className="text-2xl font-black">
+                    <p className="text-xl sm:text-2xl font-black">
                         {data.age}{" "}
                         <span className="text-sm font-normal">Jours</span>
                     </p>
@@ -620,21 +588,21 @@ export const ObservationForm = ({
 
             {/* MODAL CORRECTION POIDS */}
             {showCorrectionModal && (
-                <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center p-6 border-4 border-red-500 rounded-lg shadow-2xl animate-fade-in">
-                    <p className="text-red-700 font-black text-xl mb-4">
+                <div className="fixed inset-0 z-50 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center p-6 border-4 border-red-500 rounded-none sm:rounded-lg shadow-2xl animate-fade-in">
+                    <p className="text-red-700 font-black text-xl mb-4 text-center">
                         🚨 ANOMALIE POIDS (-10%)
                     </p>
                     <textarea
-                        className="w-full border-2 border-red-300 p-3 rounded mb-4"
+                        className="w-full border-2 border-red-300 p-3 rounded mb-4 text-base"
                         rows={3}
                         placeholder="Justification requise..."
                         value={correctionReason}
                         onChange={(e) => setCorrectionReason(e.target.value)}
                     />
-                    <div className="flex gap-3 w-full">
+                    <div className="flex flex-col sm:flex-row gap-3 w-full">
                         <button
                             onClick={() => setShowCorrectionModal(false)}
-                            className="flex-1 py-3 bg-gray-200 rounded font-bold"
+                            className="flex-1 py-3 bg-gray-200 rounded font-bold min-h-[44px]"
                         >
                             Annuler
                         </button>
@@ -642,7 +610,7 @@ export const ObservationForm = ({
                             onClick={() => {
                                 if (correctionReason) saveObservation();
                             }}
-                            className="flex-1 py-3 bg-red-600 text-white font-bold rounded"
+                            className="flex-1 py-3 bg-red-600 text-white font-bold rounded min-h-[44px]"
                         >
                             VALIDER
                         </button>
@@ -656,7 +624,7 @@ export const ObservationForm = ({
                     <button
                         type="button"
                         onClick={() => setShowHistory(!showHistory)}
-                        className="w-full flex items-center justify-between px-4 py-2 bg-yellow-50 text-yellow-800 rounded-lg font-bold text-xs border border-yellow-200 hover:bg-yellow-100 transition"
+                        className="w-full flex items-center justify-between px-4 py-3 sm:py-2 bg-yellow-50 text-yellow-800 rounded-lg font-bold text-xs border border-yellow-200 hover:bg-yellow-100 transition min-h-[44px]"
                     >
                         <span>
                             📚 Historique ({historyList.length} visites)
@@ -666,7 +634,7 @@ export const ObservationForm = ({
                     {showHistory && (
                         <div className="mt-2 bg-yellow-50 p-3 rounded-lg border border-yellow-200 animate-in slide-in-from-top-2">
                             <select
-                                className="w-full text-xs p-2 rounded border border-yellow-300 bg-white mb-3"
+                                className="w-full text-base sm:text-xs p-2 rounded border border-yellow-300 bg-white mb-3 min-h-[44px]"
                                 value={selectedHistoryId || ""}
                                 onChange={(e) =>
                                     setSelectedHistoryId(Number(e.target.value))
@@ -718,11 +686,11 @@ export const ObservationForm = ({
 
             <form
                 onSubmit={handleSubmit}
-                className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 animate-fade-in"
+                className="bg-white p-3 sm:p-5 rounded-xl shadow-sm border border-gray-100 animate-fade-in"
             >
                 {/* ALERTES VACCINS */}
                 {dueVaccines.length > 0 && (
-                    <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 rounded-r-lg">
+                    <div className="bg-blue-50 border-l-4 border-blue-500 p-3 sm:p-4 mb-6 rounded-r-lg">
                         <h4 className="font-black text-blue-900 text-xs uppercase mb-2">
                             💉 Vaccination Requise (J{data.age})
                         </h4>
@@ -730,18 +698,18 @@ export const ObservationForm = ({
                             {dueVaccines.map((task) => (
                                 <div
                                     key={task.id}
-                                    className="flex items-center justify-between bg-white p-2 rounded border border-blue-100 shadow-sm"
+                                    className="flex items-center justify-between bg-white p-2 rounded border border-blue-100 shadow-sm min-h-[44px]"
                                 >
                                     <span className="font-bold text-sm text-gray-700">
                                         {task.name}{" "}
-                                        <span className="text-xs text-gray-500 font-normal">
+                                        <span className="text-xs text-gray-500 font-normal block sm:inline">
                                             ({task.type})
                                         </span>
                                     </span>
-                                    <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                                    <label className="flex items-center gap-2 text-sm cursor-pointer select-none px-2">
                                         <input
                                             type="checkbox"
-                                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                                            className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
                                             checked={data.vaccinesDone?.includes(
                                                 task.id,
                                             )}
@@ -770,8 +738,8 @@ export const ObservationForm = ({
                     </div>
                 )}
 
-                {/* GRILLE PARAMÈTRES VITAUX */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                {/* GRILLE PARAMÈTRES VITAUX - Optimisé Mobile (2 cols max) */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
                     <div
                         className={`p-3 bg-${data.mortalite > 100 ? "red" : data.mortalite > 0 ? "orange" : "green"}-50 rounded-lg border border-${data.mortalite > 100 ? "red" : data.mortalite > 0 ? "orange" : "green"}-100`}
                     >
@@ -782,7 +750,7 @@ export const ObservationForm = ({
                         </label>
                         <input
                             type="number"
-                            className={`w-full bg-transparent text-xl font-black text-${data.mortalite > 100 ? "red-700" : data.mortalite > 0 ? "orange-700" : "green-700"} focus:outline-none placeholder-red-200`}
+                            className={`w-full bg-transparent text-xl font-black text-${data.mortalite > 100 ? "red-700" : data.mortalite > 0 ? "orange-700" : "green-700"} focus:outline-none placeholder-red-200 text-base`}
                             placeholder="0"
                             value={data.mortalite}
                             onChange={(e) =>
@@ -800,7 +768,7 @@ export const ObservationForm = ({
                         <input
                             type="number"
                             step="0.1"
-                            className="w-full bg-transparent text-xl font-black text-gray-800 focus:outline-none"
+                            className="w-full bg-transparent text-xl font-black text-gray-800 focus:outline-none text-base"
                             placeholder="0"
                             value={data.poidsMoyen}
                             onChange={(e) =>
@@ -818,7 +786,7 @@ export const ObservationForm = ({
                         </label>
                         <input
                             type="number"
-                            className="w-full bg-transparent text-xl font-black text-gray-800 focus:outline-none"
+                            className="w-full bg-transparent text-xl font-black text-gray-800 focus:outline-none text-base"
                             placeholder="0"
                             value={data.consoTete}
                             onChange={(e) =>
@@ -837,7 +805,7 @@ export const ObservationForm = ({
                                 : "bg-blue-50 border-blue-100"
                         }`}
                     >
-                        <div className="flex justify-between items-center">
+                        <div className="flex justify-between items-center mb-2 sm:mb-0">
                             <label
                                 className={`text-[10px] font-bold uppercase block ${
                                     isFirstObservation
@@ -848,7 +816,6 @@ export const ObservationForm = ({
                                 Eau {isFirstObservation && "(Réf.)"}
                             </label>
 
-                            {/* SPAN D'AFFICHAGE */}
                             <span
                                 className={`text-[10px] font-black uppercase ${
                                     isFirstObservation
@@ -862,14 +829,13 @@ export const ObservationForm = ({
                                     ? "🔒 Stable"
                                     : data.waterConsumptionIncrease === "yes"
                                       ? "En Hausse"
-                                      : data.waterConsumptionIncrease ===
-                                          "stable"
+                                      : data.waterConsumptionIncrease === "stable"
                                         ? "Stable"
                                         : "En Baisse"}
                             </span>
                         </div>
 
-                        <div className="flex gap-1 mt-1">
+                        <div className="flex gap-1 mt-1 h-8 sm:h-auto">
                             <button
                                 type="button"
                                 disabled={isFirstObservation}
@@ -879,7 +845,7 @@ export const ObservationForm = ({
                                         "yes",
                                     )
                                 }
-                                className={`flex-1 py-1 rounded text-xs font-bold transition-colors ${
+                                className={`flex-1 rounded text-xs font-bold transition-colors flex items-center justify-center ${
                                     isFirstObservation
                                         ? "bg-gray-100 text-gray-300 cursor-not-allowed"
                                         : data.waterConsumptionIncrease ===
@@ -899,9 +865,9 @@ export const ObservationForm = ({
                                         "stable",
                                     )
                                 }
-                                className={`flex-1 py-1 rounded text-xs font-bold transition-colors ${
+                                className={`flex-1 rounded text-xs font-bold transition-colors flex items-center justify-center ${
                                     isFirstObservation
-                                        ? "bg-gray-200 text-gray-500 cursor-not-allowed border border-gray-300" // Actif visuellement mais grisé
+                                        ? "bg-gray-200 text-gray-500 cursor-not-allowed border border-gray-300"
                                         : data.waterConsumptionIncrease ===
                                             "stable"
                                           ? "bg-blue-600 text-white shadow-sm"
@@ -916,7 +882,7 @@ export const ObservationForm = ({
                                 onClick={() =>
                                     updateData("waterConsumptionIncrease", "no")
                                 }
-                                className={`flex-1 py-1 rounded text-xs font-bold transition-colors ${
+                                className={`flex-1 rounded text-xs font-bold transition-colors flex items-center justify-center ${
                                     isFirstObservation
                                         ? "bg-gray-100 text-gray-300 cursor-not-allowed"
                                         : data.waterConsumptionIncrease === "no"
@@ -930,7 +896,7 @@ export const ObservationForm = ({
                     </div>
                 </div>
 
-                {/* QUALITÉ & ENVIRONNEMENT */}
+                {/* QUALITÉ & ENVIRONNEMENT - Optimisé 2 cols mobile */}
                 <h4 className="text-xs font-bold text-gray-400 uppercase mb-3 border-b pb-1">
                     Environnement
                 </h4>
@@ -940,7 +906,7 @@ export const ObservationForm = ({
                             pH Eau
                         </label>
                         <select
-                            className={`w-full p-2 border border-gray-200 rounded text-sm ${phFeedback.style}`}
+                            className={`w-full p-2 border border-gray-200 rounded text-base sm:text-sm h-[40px] ${phFeedback.style}`}
                             value={data.phValue}
                             onChange={(e) =>
                                 updateData("phValue", e.target.value)
@@ -964,7 +930,7 @@ export const ObservationForm = ({
                             Litière
                         </label>
                         <select
-                            className={`w-full p-2 border border-gray-200 rounded text-sm ${litiereFeedback.style}`}
+                            className={`w-full p-2 border border-gray-200 rounded text-base sm:text-sm h-[40px] ${litiereFeedback.style}`}
                             value={data.litiere}
                             onChange={(e) =>
                                 updateData("litiere", e.target.value)
@@ -972,13 +938,13 @@ export const ObservationForm = ({
                         >
                             <option value="">-- État --</option>
                             <option value="Sèche / Friable">
-                                ✅ Sèche / Friable
+                                ✅ Sèche
                             </option>
                             <option value="Légèrement Humide">
-                                ⚠️ Légèrement Humide
+                                ⚠️ Humide
                             </option>
                             <option value="Collante / Détrempée">
-                                🚨 Collante / Détrempée
+                                🚨 Détrempée
                             </option>
                             <option value="Croûteuse">🚨 Croûteuse</option>
                         </select>
@@ -993,7 +959,7 @@ export const ObservationForm = ({
                             Uniformité
                         </label>
                         <select
-                            className={`w-full p-2 border border-gray-200 rounded text-sm ${unifFeedback.style}`}
+                            className={`w-full p-2 border border-gray-200 rounded text-base sm:text-sm h-[40px] ${unifFeedback.style}`}
                             value={data.uniformite}
                             onChange={(e) =>
                                 updateData("uniformite", e.target.value)
@@ -1004,10 +970,10 @@ export const ObservationForm = ({
                                 🏆 &gt; 90%
                             </option>
                             <option value="80% - 90% (Bon)">
-                                ✅ 80% - 90%
+                                ✅ 80-90%
                             </option>
                             <option value="60% - 80% (Moyen)">
-                                ⚠️ 60% - 80%
+                                ⚠️ 60-80%
                             </option>
                             <option value="< 60% (Mauvais)">🚨 &lt; 60%</option>
                         </select>
@@ -1022,7 +988,7 @@ export const ObservationForm = ({
                             CV (%)
                         </label>
                         <select
-                            className={`w-full p-2 border border-gray-200 rounded text-sm ${cvFeedback.style}`}
+                            className={`w-full p-2 border border-gray-200 rounded text-base sm:text-sm h-[40px] ${cvFeedback.style}`}
                             value={data.cv}
                             onChange={(e) => updateData("cv", e.target.value)}
                         >
@@ -1040,7 +1006,7 @@ export const ObservationForm = ({
                     </div>
                 </div>
 
-                {/* SECTION MATÉRIEL (ABREUVOIRS & MANGEOIRES) */}
+                {/* SECTION MATÉRIEL */}
                 {!isFish && (
                     <div className="grid grid-cols-2 gap-4 mb-6">
                         {/* ABREUVOIRS */}
@@ -1054,7 +1020,7 @@ export const ObservationForm = ({
                                     : "bg-blue-50 border-blue-200"
                             }`}
                         >
-                            <div className="flex justify-between items-start mb-1">
+                            <div className="flex flex-col sm:flex-row justify-between items-start mb-1 gap-1 sm:gap-0">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase">
                                     💧 Abreuvoirs
                                 </label>
@@ -1074,14 +1040,13 @@ export const ObservationForm = ({
                                             (flock.subjectCount -
                                                 data.mortalite) /
                                             data.abreuvoirs
-                                        ).toFixed(0)}{" "}
-                                        suj.
+                                        ).toFixed(0)}
                                     </span>
                                 )}
                             </div>
                             <input
                                 type="number"
-                                className="w-full bg-transparent text-xl font-black text-gray-800 focus:outline-none placeholder-gray-300"
+                                className="w-full bg-transparent text-xl font-black text-gray-800 focus:outline-none placeholder-gray-300 text-base"
                                 placeholder="0"
                                 value={data.abreuvoirs}
                                 onChange={(e) =>
@@ -1104,7 +1069,7 @@ export const ObservationForm = ({
                                     : "bg-orange-50 border-orange-200"
                             }`}
                         >
-                            <div className="flex justify-between items-start mb-1">
+                            <div className="flex flex-col sm:flex-row justify-between items-start mb-1 gap-1 sm:gap-0">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase">
                                     🍽️ Mangeoires
                                 </label>
@@ -1124,14 +1089,13 @@ export const ObservationForm = ({
                                             (flock.subjectCount -
                                                 data.mortalite) /
                                             data.mangeoires
-                                        ).toFixed(0)}{" "}
-                                        suj.
+                                        ).toFixed(0)}
                                     </span>
                                 )}
                             </div>
                             <input
                                 type="number"
-                                className="w-full bg-transparent text-xl font-black text-gray-800 focus:outline-none placeholder-gray-300"
+                                className="w-full bg-transparent text-xl font-black text-gray-800 focus:outline-none placeholder-gray-300 text-base"
                                 placeholder="0"
                                 value={data.mangeoires}
                                 onChange={(e) =>
@@ -1145,16 +1109,16 @@ export const ObservationForm = ({
                     </div>
                 )}
 
-                {/* SECTION ALIMENTATION & LOGISTIQUE (RESTAURÉE) */}
-                <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 mb-6 relative overflow-hidden">
+                {/* SECTION ALIMENTATION & LOGISTIQUE */}
+                <div className="bg-orange-50 p-3 sm:p-4 rounded-xl border border-orange-200 mb-6 relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
                         <span className="text-6xl">🥣</span>
                     </div>
-                    <div className="flex justify-between items-center mb-4 relative z-10">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 relative z-10 gap-2 sm:gap-0">
                         <h4 className="text-sm font-black text-orange-900 uppercase">
                             Pilotage Alimentaire
                         </h4>
-                        <span className="text-[10px] font-bold bg-white/50 px-2 py-1 rounded text-orange-800 border border-orange-100">
+                        <span className="text-[10px] font-bold bg-white/50 px-2 py-1 rounded text-orange-800 border border-orange-100 self-start">
                             {feedStrategy === "INDUSTRIAL"
                                 ? "Industriel"
                                 : feedStrategy === "SELF_MIX"
@@ -1169,7 +1133,7 @@ export const ObservationForm = ({
                                 Stratégie
                             </label>
                             <select
-                                className="w-full border-gray-200 p-2 rounded text-sm bg-white focus:ring-2 focus:ring-orange-500 outline-none"
+                                className="w-full border-gray-200 p-2 rounded text-base sm:text-sm bg-white focus:ring-2 focus:ring-orange-500 outline-none h-[44px]"
                                 value={feedStrategy}
                                 onChange={(e) =>
                                     handleStrategyChange(e.target.value as any)
@@ -1197,7 +1161,7 @@ export const ObservationForm = ({
                             {feedStrategy === "THIRD_PARTY" ? (
                                 <input
                                     type="text"
-                                    className="w-full border-orange-200 p-2 rounded text-sm bg-white"
+                                    className="w-full border-orange-200 p-2 rounded text-base sm:text-sm bg-white h-[44px]"
                                     placeholder="Ex: Provenderie..."
                                     value={feedBrand}
                                     onChange={(e) =>
@@ -1206,7 +1170,7 @@ export const ObservationForm = ({
                                 />
                             ) : (
                                 <select
-                                    className={`w-full border p-2 rounded text-sm bg-white outline-none focus:ring-2 ${!feedBrand || (feedBrand && !feedBrand.includes(currentStage.split(" ")[0])) ? "border-orange-500 ring-orange-200 text-orange-900 font-bold" : "border-orange-200"}`}
+                                    className={`w-full border p-2 rounded text-base sm:text-sm bg-white outline-none focus:ring-2 h-[44px] ${!feedBrand || (feedBrand && !feedBrand.includes(currentStage.split(" ")[0])) ? "border-orange-500 ring-orange-200 text-orange-900 font-bold" : "border-orange-200"}`}
                                     value={feedBrand}
                                     onChange={(e) =>
                                         setFeedBrand(e.target.value)
@@ -1225,11 +1189,11 @@ export const ObservationForm = ({
                         </div>
                     </div>
 
-                    {/* WIDGET CALCULATEUR DE SACS (RESTAURÉ) */}
+                    {/* WIDGET CALCULATEUR DE SACS - Optimisé Mobile (Column) */}
                     {bagForecast.days > 0 && (
-                        <div className="bg-white/80 p-3 rounded-lg border border-orange-200 flex flex-col md:flex-row justify-between items-center gap-4 relative z-10">
+                        <div className="bg-white/80 p-3 rounded-lg border border-orange-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative z-10">
                             <div className="flex items-center gap-3">
-                                <div className="bg-orange-100 p-2 rounded-full text-xl">
+                                <div className="bg-orange-100 p-2 rounded-full text-xl shrink-0">
                                     📅
                                 </div>
                                 <div>
@@ -1245,9 +1209,12 @@ export const ObservationForm = ({
                                     </p>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-3 bg-orange-50 px-4 py-2 rounded-lg border border-orange-100">
+                            <div className="flex items-center gap-3 bg-orange-50 px-4 py-2 rounded-lg border border-orange-100 w-full sm:w-auto justify-between sm:justify-start">
+                                <p className="text-[10px] font-bold text-orange-400 uppercase sm:hidden">
+                                    Prévision Commande
+                                </p>
                                 <div className="text-right">
-                                    <p className="text-[10px] font-bold text-orange-400 uppercase">
+                                    <p className="text-[10px] font-bold text-orange-400 uppercase hidden sm:block">
                                         Prévision Commande
                                     </p>
                                     <p className="text-lg font-black text-orange-600 leading-none">
@@ -1264,7 +1231,7 @@ export const ObservationForm = ({
                     {/* GESTION DES STOCKS (INVENTAIRE) */}
                     <div className="mt-4 pt-4 border-t border-orange-200/50 relative z-10">
                         {feedStrategy === "SELF_MIX" ? (
-                            /* --- CAS 1 : FABRICATION À LA FERME (3 Ingrédients) --- */
+                            /* --- CAS 1 : FABRICATION À LA FERME --- */
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 {/* MAÏS */}
                                 <div className="bg-white p-2 rounded border border-yellow-200 shadow-sm">
@@ -1273,53 +1240,25 @@ export const ObservationForm = ({
                                     </label>
                                     <div className="flex gap-2">
                                         <div className="flex-1">
-                                            <label className="sr-only">
-                                                Achats (après la dernière
-                                                visite)
-                                            </label>
                                             <input
                                                 type="number"
                                                 placeholder="+ Entrée"
-                                                className="w-full text-xs p-1 border border-gray-200 rounded outline-none focus:border-yellow-400"
-                                                value={
-                                                    inventory.mais?.added || 0
-                                                }
-                                                onChange={(e) =>
-                                                    updateInventory(
-                                                        "mais",
-                                                        "added",
-                                                        parseFloat(
-                                                            e.target.value,
-                                                        ),
-                                                    )
-                                                }
+                                                className="w-full text-base sm:text-xs p-2 sm:p-1 border border-gray-200 rounded outline-none focus:border-yellow-400 h-[40px] sm:h-auto"
+                                                value={inventory.mais?.added || 0}
+                                                onChange={(e) => updateInventory("mais", "added", parseFloat(e.target.value))}
                                             />
                                         </div>
                                         <div className="flex-1">
-                                            <label className="sr-only">
-                                                Stock actuel
-                                            </label>
                                             <input
                                                 type="number"
                                                 placeholder="Stock"
-                                                className="w-full text-xs font-bold p-1 border border-gray-200 rounded outline-none focus:border-yellow-400 bg-yellow-50 text-yellow-900"
-                                                value={
-                                                    inventory.mais?.current || 0
-                                                }
-                                                onChange={(e) =>
-                                                    updateInventory(
-                                                        "mais",
-                                                        "current",
-                                                        parseFloat(
-                                                            e.target.value,
-                                                        ),
-                                                    )
-                                                }
+                                                className="w-full text-base sm:text-xs font-bold p-2 sm:p-1 border border-gray-200 rounded outline-none focus:border-yellow-400 bg-yellow-50 text-yellow-900 h-[40px] sm:h-auto"
+                                                value={inventory.mais?.current || 0}
+                                                onChange={(e) => updateInventory("mais", "current", parseFloat(e.target.value))}
                                             />
                                         </div>
                                     </div>
                                 </div>
-
                                 {/* SOJA */}
                                 <div className="bg-white p-2 rounded border border-green-200 shadow-sm">
                                     <label className="text-[10px] block font-bold text-green-600 uppercase mb-1">
@@ -1327,53 +1266,25 @@ export const ObservationForm = ({
                                     </label>
                                     <div className="flex gap-2">
                                         <div className="flex-1">
-                                            <label className="sr-only">
-                                                Achats (après la dernière
-                                                visite)
-                                            </label>
                                             <input
                                                 type="number"
                                                 placeholder="+ Entrée"
-                                                className="w-full text-xs p-1 border border-gray-200 rounded outline-none focus:border-green-400"
-                                                value={
-                                                    inventory.soja?.added || 0
-                                                }
-                                                onChange={(e) =>
-                                                    updateInventory(
-                                                        "soja",
-                                                        "added",
-                                                        parseFloat(
-                                                            e.target.value,
-                                                        ),
-                                                    )
-                                                }
+                                                className="w-full text-base sm:text-xs p-2 sm:p-1 border border-gray-200 rounded outline-none focus:border-green-400 h-[40px] sm:h-auto"
+                                                value={inventory.soja?.added || 0}
+                                                onChange={(e) => updateInventory("soja", "added", parseFloat(e.target.value))}
                                             />
                                         </div>
                                         <div className="flex-1">
-                                            <label className="sr-only">
-                                                Stock actuel
-                                            </label>
                                             <input
                                                 type="number"
                                                 placeholder="Stock"
-                                                className="w-full text-xs font-bold p-1 border border-gray-200 rounded outline-none focus:border-green-400 bg-green-50 text-green-900"
-                                                value={
-                                                    inventory.soja?.current || 0
-                                                }
-                                                onChange={(e) =>
-                                                    updateInventory(
-                                                        "soja",
-                                                        "current",
-                                                        parseFloat(
-                                                            e.target.value,
-                                                        ),
-                                                    )
-                                                }
+                                                className="w-full text-base sm:text-xs font-bold p-2 sm:p-1 border border-gray-200 rounded outline-none focus:border-green-400 bg-green-50 text-green-900 h-[40px] sm:h-auto"
+                                                value={inventory.soja?.current || 0}
+                                                onChange={(e) => updateInventory("soja", "current", parseFloat(e.target.value))}
                                             />
                                         </div>
                                     </div>
                                 </div>
-
                                 {/* CONCENTRÉ */}
                                 <div className="bg-white p-2 rounded border border-indigo-200 shadow-sm">
                                     <label className="text-[10px] block font-bold text-indigo-600 uppercase mb-1">
@@ -1381,57 +1292,28 @@ export const ObservationForm = ({
                                     </label>
                                     <div className="flex gap-2">
                                         <div className="flex-1">
-                                            <label className="sr-only">
-                                                Achats (après la dernière
-                                                visite)
-                                            </label>
                                             <input
                                                 type="number"
                                                 placeholder="+ Entrée"
-                                                className="w-full text-xs p-1 border border-gray-200 rounded outline-none focus:border-indigo-400"
-                                                value={
-                                                    inventory.concentre
-                                                        ?.added || 0
-                                                }
-                                                onChange={(e) =>
-                                                    updateInventory(
-                                                        "concentre",
-                                                        "added",
-                                                        parseFloat(
-                                                            e.target.value,
-                                                        ),
-                                                    )
-                                                }
+                                                className="w-full text-base sm:text-xs p-2 sm:p-1 border border-gray-200 rounded outline-none focus:border-indigo-400 h-[40px] sm:h-auto"
+                                                value={inventory.concentre?.added || 0}
+                                                onChange={(e) => updateInventory("concentre", "added", parseFloat(e.target.value))}
                                             />
                                         </div>
                                         <div className="flex-1">
-                                            <label className="sr-only">
-                                                Stock actuel
-                                            </label>
                                             <input
                                                 type="number"
                                                 placeholder="Stock"
-                                                className="w-full text-xs font-bold p-1 border border-gray-200 rounded outline-none focus:border-indigo-400 bg-indigo-50 text-indigo-900"
-                                                value={
-                                                    inventory.concentre
-                                                        ?.current || 0
-                                                }
-                                                onChange={(e) =>
-                                                    updateInventory(
-                                                        "concentre",
-                                                        "current",
-                                                        parseFloat(
-                                                            e.target.value,
-                                                        ),
-                                                    )
-                                                }
+                                                className="w-full text-base sm:text-xs font-bold p-2 sm:p-1 border border-gray-200 rounded outline-none focus:border-indigo-400 bg-indigo-50 text-indigo-900 h-[40px] sm:h-auto"
+                                                value={inventory.concentre?.current || 0}
+                                                onChange={(e) => updateInventory("concentre", "current", parseFloat(e.target.value))}
                                             />
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         ) : (
-                            /* --- CAS 2 : INDUSTRIEL OU VRAC (1 seul type d'aliment) --- */
+                            /* --- CAS 2 : INDUSTRIEL OU VRAC --- */
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="bg-white p-2 rounded border border-green-200">
                                     <label className="text-[10px] block font-bold text-green-600 uppercase">
@@ -1439,15 +1321,9 @@ export const ObservationForm = ({
                                     </label>
                                     <input
                                         type="number"
-                                        className="w-full font-bold text-green-800 outline-none"
+                                        className="w-full font-bold text-green-800 outline-none text-base"
                                         value={inventory.complete.added}
-                                        onChange={(e) =>
-                                            updateInventory(
-                                                "complete",
-                                                "added",
-                                                parseFloat(e.target.value),
-                                            )
-                                        }
+                                        onChange={(e) => updateInventory("complete", "added", parseFloat(e.target.value))}
                                     />
                                 </div>
                                 <div className="bg-white p-2 rounded border border-blue-200">
@@ -1456,15 +1332,9 @@ export const ObservationForm = ({
                                     </label>
                                     <input
                                         type="number"
-                                        className="w-full font-bold text-blue-800 outline-none"
+                                        className="w-full font-bold text-blue-800 outline-none text-base"
                                         value={inventory.complete.current}
-                                        onChange={(e) =>
-                                            updateInventory(
-                                                "complete",
-                                                "current",
-                                                parseFloat(e.target.value),
-                                            )
-                                        }
+                                        onChange={(e) => updateInventory("complete", "current", parseFloat(e.target.value))}
                                     />
                                 </div>
                             </div>
@@ -1482,9 +1352,9 @@ export const ObservationForm = ({
                             {liveInsights.map((insight, idx) => (
                                 <li
                                     key={idx}
-                                    className={`text-xs p-2 rounded border-l-4 flex gap-2 ${insight.type === "danger" ? "bg-white border-red-500 text-red-700 font-medium shadow-sm" : "bg-white/50 border-orange-400 text-orange-800"}`}
+                                    className={`text-xs p-3 sm:p-2 rounded border-l-4 flex gap-2 ${insight.type === "danger" ? "bg-white border-red-500 text-red-700 font-medium shadow-sm" : "bg-white/50 border-orange-400 text-orange-800"}`}
                                 >
-                                    <span>
+                                    <span className="shrink-0">
                                         {insight.type === "danger"
                                             ? "🛑"
                                             : "⚠️"}
@@ -1503,7 +1373,7 @@ export const ObservationForm = ({
                             Observations Générales
                         </label>
                         <textarea
-                            className="w-full border p-3 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                            className="w-full border p-3 rounded-lg text-base sm:text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                             rows={2}
                             placeholder="Comportement, ambiance, notes..."
                             value={common.observation}
@@ -1522,15 +1392,15 @@ export const ObservationForm = ({
                                 <h5 className="text-xs font-bold text-orange-900 mb-2 uppercase">
                                     ⏳ Problèmes à résoudre
                                 </h5>
-                                <div className="space-y-1">
+                                <div className="space-y-2">
                                     {existingOpenProblems.map((p: any) => (
                                         <label
                                             key={p["@id"]}
-                                            className={`flex items-center gap-2 text-xs p-2 rounded border cursor-pointer hover:bg-white transition ${resolvedProblemIds.includes(p["@id"]) ? "bg-green-100 border-green-300 opacity-60" : "bg-white border-orange-200"}`}
+                                            className={`flex items-start sm:items-center gap-2 text-xs p-3 sm:p-2 rounded border cursor-pointer hover:bg-white transition ${resolvedProblemIds.includes(p["@id"]) ? "bg-green-100 border-green-300 opacity-60" : "bg-white border-orange-200"}`}
                                         >
                                             <input
                                                 type="checkbox"
-                                                className="w-4 h-4 text-green-600 rounded"
+                                                className="w-5 h-5 sm:w-4 sm:h-4 text-green-600 rounded mt-0.5 sm:mt-0"
                                                 checked={resolvedProblemIds.includes(
                                                     p["@id"],
                                                 )}
@@ -1550,7 +1420,7 @@ export const ObservationForm = ({
                                                 }
                                             >
                                                 {p.description}{" "}
-                                                <span className="text-[10px] px-1 bg-gray-100 rounded text-gray-500 ml-1">
+                                                <span className="text-[10px] px-1 bg-gray-100 rounded text-gray-500 ml-1 block sm:inline mt-1 sm:mt-0 w-fit">
                                                     {p.severity}
                                                 </span>
                                             </span>
@@ -1565,15 +1435,15 @@ export const ObservationForm = ({
                                 ⚡ Nouveau Problème ?
                             </h5>
                             {newProblems.length > 0 && (
-                                <ul className="mb-3 space-y-1">
+                                <ul className="mb-3 space-y-2">
                                     {newProblems.map((p, idx) => (
                                         <li
                                             key={idx}
-                                            className="flex justify-between items-center text-xs bg-white p-2 rounded border border-red-100 shadow-sm"
+                                            className="flex justify-between items-center text-xs bg-white p-2 rounded border border-red-100 shadow-sm min-h-[40px]"
                                         >
                                             <div className="flex items-center gap-2">
                                                 <span
-                                                    className={`w-2 h-2 rounded-full ${p.severity === "critical" ? "bg-red-600" : p.severity === "high" ? "bg-orange-500" : "bg-yellow-400"}`}
+                                                    className={`w-2 h-2 rounded-full shrink-0 ${p.severity === "critical" ? "bg-red-600" : p.severity === "high" ? "bg-orange-500" : "bg-yellow-400"}`}
                                                 />
                                                 <span className="font-medium text-gray-700">
                                                     {p.description}
@@ -1584,7 +1454,7 @@ export const ObservationForm = ({
                                                 onClick={() =>
                                                     handleRemoveProblem(idx)
                                                 }
-                                                className="text-red-400 hover:text-red-600 font-bold px-2"
+                                                className="text-red-400 hover:text-red-600 font-bold px-3 py-1"
                                             >
                                                 ×
                                             </button>
@@ -1592,10 +1462,10 @@ export const ObservationForm = ({
                                     ))}
                                 </ul>
                             )}
-                            <div className="flex gap-2">
+                            <div className="grid grid-cols-1 sm:flex gap-2">
                                 <input
                                     type="text"
-                                    className="flex-1 border-gray-200 p-2 rounded text-xs focus:ring-2 focus:ring-red-200 outline-none"
+                                    className="w-full sm:flex-1 border-gray-200 p-2 rounded text-base sm:text-xs focus:ring-2 focus:ring-red-200 outline-none h-[44px] sm:h-auto"
                                     placeholder="Description du problème..."
                                     value={tempProblem.description}
                                     onChange={(e) =>
@@ -1605,31 +1475,35 @@ export const ObservationForm = ({
                                         })
                                     }
                                 />
-                                <select
-                                    className="border-red-200 p-2 rounded text-xs bg-white"
-                                    value={tempProblem.severity}
-                                    onChange={(e) =>
-                                        setTempProblem({
-                                            ...tempProblem,
-                                            severity: e.target.value as any,
-                                        })
-                                    }
-                                >
-                                    <option value="medium">Moyen</option>
-                                    <option value="high">Élevé</option>
-                                    <option value="critical">Critique</option>
-                                </select>
-                                <button
-                                    type="button"
-                                    onClick={handleAddProblem}
-                                    className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 rounded shadow-sm"
-                                >
-                                    AJOUTER
-                                </button>
+                                <div className="flex gap-2">
+                                    <select
+                                        className="flex-1 sm:flex-none border-red-200 p-2 rounded text-base sm:text-xs bg-white h-[44px] sm:h-auto"
+                                        value={tempProblem.severity}
+                                        onChange={(e) =>
+                                            setTempProblem({
+                                                ...tempProblem,
+                                                severity: e.target.value as any,
+                                            })
+                                        }
+                                    >
+                                        <option value="medium">Moyen</option>
+                                        <option value="high">Élevé</option>
+                                        <option value="critical">Critique</option>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        onClick={handleAddProblem}
+                                        className="flex-1 sm:flex-none bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 rounded shadow-sm h-[44px] sm:h-auto"
+                                    >
+                                        AJOUTER
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
+
+                {/* PHOTOS */}
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
                     <h4 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2">
                         📸 Photos du lot
@@ -1642,7 +1516,7 @@ export const ObservationForm = ({
                                 <button
                                     type="button"
                                     onClick={() => removePhoto(idx)}
-                                    className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold shadow"
+                                    className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold shadow"
                                 >
                                     ×
                                 </button>
@@ -1650,15 +1524,15 @@ export const ObservationForm = ({
                         ))}
                         
                         {/* Bouton d'ajout */}
-                        <label className={`flex flex-col items-center justify-center aspect-square rounded-lg border-2 border-dashed border-gray-300 cursor-pointer hover:bg-gray-100 transition ${isCompressing ? 'opacity-50' : ''}`}>
-                            <span className="text-2xl">📷</span>
-                            <span className="text-[10px] font-bold text-gray-500 mt-1">
+                        <label className={`flex flex-col items-center justify-center aspect-square rounded-lg border-2 border-dashed border-gray-300 cursor-pointer hover:bg-gray-100 transition active:bg-gray-200 ${isCompressing ? 'opacity-50' : ''}`}>
+                            <span className="text-3xl sm:text-2xl">📷</span>
+                            <span className="text-xs sm:text-[10px] font-bold text-gray-500 mt-1">
                                 {isCompressing ? '...' : 'Ajouter'}
                             </span>
                             <input 
                                 type="file" 
                                 accept="image/*" 
-                                capture="environment" // Force la caméra arrière sur mobile
+                                capture="environment"
                                 className="hidden" 
                                 onChange={handlePhotoAdd}
                                 disabled={isCompressing}
@@ -1666,22 +1540,22 @@ export const ObservationForm = ({
                         </label>
                     </div>
                     <p className="text-[10px] text-gray-400 italic">
-                        Les photos sont compressées automatiquement pour l'envoi rapide.
+                        Les photos sont compressées automatiquement.
                     </p>
                 </div>
 
-                <div className="flex gap-3 justify-end pt-6 border-t border-gray-100">
+                <div className="flex flex-col-reverse sm:flex-row gap-3 justify-end pt-6 border-t border-gray-100">
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="px-6 py-3 text-gray-500 font-bold text-sm hover:bg-gray-50 rounded-lg transition"
+                        className="w-full sm:w-auto px-6 py-4 sm:py-3 text-gray-500 font-bold text-sm hover:bg-gray-50 rounded-lg transition border border-transparent sm:border-transparent hover:border-gray-200"
                     >
                         Annuler
                     </button>
                     <button
                         type="submit"
                         disabled={loading}
-                        className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg shadow-lg shadow-indigo-200 transition transform active:scale-95 flex items-center gap-2"
+                        className="w-full sm:w-auto px-8 py-4 sm:py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg shadow-lg shadow-indigo-200 transition transform active:scale-95 flex items-center justify-center gap-2"
                     >
                         {loading ? (
                             <span className="animate-spin">⏳</span>
