@@ -446,6 +446,7 @@ export default function DashboardHome() {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
                         <MenuCard title="Clients" icon="👥" href="/dashboard/customers" color="blue" description="Gérer le portefeuille client." />
                         <MenuCard title="Visites" icon="🚜" href="/dashboard/visits" color="indigo" description="Rapports et interventions." />
+                        <MenuCard title="Prospections" icon="🔭" href="/dashboard/prospections" color="purple" description="Suivi des prospects et consultations." />
                         <MenuCard title="Bandes" icon="🐣" href="/dashboard/flocks" color="green" description="Suivi des lots en cours." />
                         <MenuCard title="Bâtiments" icon="🏠" href="/dashboard/buildings" color="orange" description="Infrastructures." />
                         {isSupport && <MenuCard title="Utilisateurs" icon="🔐" href="/dashboard/users" color="red" description="Administration des accès." />}

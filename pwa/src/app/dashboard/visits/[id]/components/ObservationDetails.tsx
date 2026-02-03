@@ -1,6 +1,9 @@
 'use client';
 import { calculateBenchmark, generateExpertInsights, getFieldFeedback, estimateTotalFeedConsumption, BenchmarkCard, Visit } from '../shared';
 
+// On définit l'URL de base pour charger les images
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
 interface Props {
     obs: any;
     flock: any;
@@ -88,6 +91,11 @@ export const ObservationDetails = ({ obs, flock, building, visit, onEdit, onClos
             obs.resolvedProblems.forEach((p:any) => text += `- ${p.description}\n`);
         }
 
+        // Photos
+        if (obs.photos && obs.photos.length > 0) {
+            text += `\n*📸 PHOTOS JOINTES : ${obs.photos.length}*\n`;
+        }
+
         if (obs.recommendations) {
             text += `\n*💡 RECOMMANDATIONS*\n${obs.recommendations}\n`;
         }
@@ -107,7 +115,6 @@ export const ObservationDetails = ({ obs, flock, building, visit, onEdit, onClos
         
         if (insights.length > 0) text += `⚠️ ${insights.length} Alertes. `;
         if (obs.detectedProblems && obs.detectedProblems.length > 0) text += `⛔ ${obs.detectedProblems.length} Pb. `;
-        if (obs.resolvedProblems && obs.resolvedProblems.length > 0) text += `✅ ${obs.resolvedProblems.length} Résolus. `;
         
         const phone = visit.customer.phoneNumber || '';
         const separator = navigator.userAgent.toLowerCase().includes("iphone") ? "&" : "?";
@@ -140,26 +147,26 @@ export const ObservationDetails = ({ obs, flock, building, visit, onEdit, onClos
                             <span>🐣 Lot: {flock.name} ({speculationName})</span>
                         </div>
                     </div>
-                    <button onClick={onClose} className="bg-white/20 p-1 rounded-full hover:bg-white/30 transition no-print">✕</button>
+                    <button onClick={onClose} className="bg-white/20 p-2 rounded-full hover:bg-white/30 transition no-print w-8 h-8 flex items-center justify-center">✕</button>
                 </div>
 
-                <div className="p-5 space-y-6">
+                <div className="p-4 sm:p-5 space-y-4 sm:space-y-6">
                     {/* Indicateurs Clés */}
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-3 gap-2 sm:gap-3">
                         <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-center">
                             <p className="text-[10px] font-bold text-blue-800 uppercase tracking-wider">Stock Vif</p>
-                            <p className="text-2xl font-black text-blue-900">{sujetsRestants}</p>
+                            <p className="text-xl sm:text-2xl font-black text-blue-900">{sujetsRestants}</p>
                             <p className="text-[10px] text-blue-600">sur {flock.subjectCount}</p>
                         </div>
                         <div className={`p-3 border rounded-lg text-center ${benchmark?.weightStatus === 'danger' ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
                             <p className="text-[10px] font-bold uppercase opacity-60">Poids Moyen</p>
-                            <p className="text-2xl font-black">{obs.data.poidsMoyen}<span className="text-sm font-normal text-gray-500">g</span></p>
+                            <p className="text-xl sm:text-2xl font-black">{obs.data.poidsMoyen}<span className="text-sm font-normal text-gray-500">g</span></p>
                             <BenchmarkCard benchmark={benchmark} type="weight" />
                         </div>
                         <div className="p-3 bg-gray-50 border border-gray-100 rounded-lg text-center">
                             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Mortalité</p>
                             <div className="flex justify-center items-baseline gap-1">
-                                <p className="text-2xl font-black text-gray-800">{obs.data.mortalite}</p>
+                                <p className="text-xl sm:text-2xl font-black text-gray-800">{obs.data.mortalite}</p>
                                 <span className="text-xs text-gray-500">jour</span>
                             </div>
                             <p className="text-[10px] font-black text-gray-600 mt-1">Total : {totalMortalite} ({pourcentMortalite}%)</p>
@@ -167,18 +174,18 @@ export const ObservationDetails = ({ obs, flock, building, visit, onEdit, onClos
                     </div>
 
                     {/* Alimentation */}
-                    <div className="bg-orange-50 p-4 rounded-xl border border-orange-100">
+                    <div className="bg-orange-50 p-3 sm:p-4 rounded-xl border border-orange-100">
                         <h5 className="text-xs font-bold text-orange-800 uppercase mb-3 flex items-center gap-2">🥣 Alimentation & Consommation</h5>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
                             <div>
                                 <span className="text-xs font-bold text-gray-500 uppercase block">Stratégie</span>
-                                <strong className="text-gray-800">{feedStrategyLabel}</strong>
+                                <strong className="text-gray-800 text-xs sm:text-sm">{feedStrategyLabel}</strong>
                                 <p className="text-xs text-gray-500 italic">{feedBrand}</p>
                             </div>
                             <div>
                                 <span className="text-xs font-bold text-gray-500 uppercase block">Conso / Tête</span>
                                 <div className="flex items-center gap-2">
-                                    <strong className="text-xl text-gray-800">{obs.data.consoTete}g</strong>
+                                    <strong className="text-lg sm:text-xl text-gray-800">{obs.data.consoTete}g</strong>
                                     <BenchmarkCard benchmark={benchmark} type="feed" />
                                 </div>
                             </div>
@@ -189,50 +196,46 @@ export const ObservationDetails = ({ obs, flock, building, visit, onEdit, onClos
                         </div>
                     </div>
 
-                    {/* Matériel & Ambiance */}
-                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                    {/* Matériel & Ambiance - Optimisé pour mobile */}
+                    <div className="bg-gray-50 p-3 sm:p-4 rounded-xl border border-gray-100">
                         <h5 className="text-xs font-bold text-gray-400 uppercase mb-3 flex items-center gap-2">⚙️ Matériel & Ambiance</h5>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div className="grid grid-cols-2 gap-2 sm:gap-4 text-sm">
                             <div className={`p-2 rounded bg-white shadow-sm border ${density > 20 ? 'border-red-300' : 'border-gray-100'}`}>
-                                <span className="text-xs font-bold text-gray-400 uppercase">Densité</span>
-                                <div className="flex justify-between items-end">
-                                    <strong className={`${density > 20 ? 'text-red-600' : 'text-gray-800'}`}>{density}</strong>
-                                    <span className="text-xs text-gray-500">suj/m²</span>
+                                <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase block">Densité</span>
+                                <div className="flex flex-col sm:flex-row justify-between sm:items-end">
+                                    <strong className={`text-base sm:text-lg ${density > 20 ? 'text-red-600' : 'text-gray-800'}`}>{density}</strong>
+                                    <span className="text-[10px] sm:text-xs text-gray-500">suj/m²</span>
                                 </div>
-                                <span className="text-[9px] text-gray-400">Surf: {surface}m²</span>
+                                <span className="text-[9px] text-gray-400 block mt-1">Surf: {surface}m²</span>
                             </div>
                             <div className="p-2 bg-white rounded shadow-sm border border-gray-100">
-                                <span className="text-xs font-bold text-gray-400 uppercase">Mangeoires</span>
-                                <div className="flex justify-between items-end">
-                                    <strong>{obs.data.mangeoires}</strong>
-                                    <span className={`text-xs font-bold ${parseInt(ratioMang) > 50 ? 'text-red-500' : 'text-green-500'}`}>1/{ratioMang} suj.</span>
+                                <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase block">Mangeoires</span>
+                                <div className="flex flex-col sm:flex-row justify-between sm:items-end">
+                                    <strong className="text-base sm:text-lg">{obs.data.mangeoires}</strong>
+                                    <span className={`text-[10px] sm:text-xs font-bold ${parseInt(ratioMang) > 50 ? 'text-red-500' : 'text-green-500'}`}>1/{ratioMang}</span>
                                 </div>
                             </div>
                             <div className="p-2 bg-white rounded shadow-sm border border-gray-100">
-                                <span className="text-xs font-bold text-gray-400 uppercase">Abreuvoirs</span>
-                                <div className="flex justify-between items-end">
-                                    <strong>{obs.data.abreuvoirs}</strong>
-                                    <span className={`text-xs font-bold ${parseInt(ratioAbr) > 70 ? 'text-red-500' : 'text-green-500'}`}>1/{ratioAbr} suj.</span>
+                                <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase block">Abreuvoirs</span>
+                                <div className="flex flex-col sm:flex-row justify-between sm:items-end">
+                                    <strong className="text-base sm:text-lg">{obs.data.abreuvoirs}</strong>
+                                    <span className={`text-[10px] sm:text-xs font-bold ${parseInt(ratioAbr) > 70 ? 'text-red-500' : 'text-green-500'}`}>1/{ratioAbr}</span>
                                 </div>
                             </div>
-                            <div className={`p-2 rounded border-l-4 ${litiereStatus.style.replace('border ', '').replace('w-full', '')} bg-white shadow-sm col-span-2`}>
-                                <div className="flex justify-between"><span className="text-xs font-bold text-gray-500 uppercase">Litière</span><strong>{obs.data.litiere || '-'}</strong></div>
+                            
+                            {/* Grille compacte pour les autres indicateurs */}
+                            <div className={`p-2 rounded border-l-4 ${litiereStatus.style.replace('border ', '').replace('w-full', '')} bg-white shadow-sm col-span-2 sm:col-span-1`}>
+                                <div className="flex justify-between items-center"><span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase">Litière</span><strong className="text-xs sm:text-sm">{obs.data.litiere || '-'}</strong></div>
                                 {litiereStatus.message && <p className="text-[10px] mt-1 italic opacity-80">{litiereStatus.message}</p>}
                             </div>
                             <div className={`p-2 rounded border-l-4 ${phStatus.style.replace('border ', '').replace('w-full', '')} bg-white shadow-sm`}>
-                                <div className="flex justify-between"><span className="text-xs font-bold text-gray-500 uppercase">pH Eau</span><strong>{obs.data.phValue || '-'}</strong></div>
-                                {phStatus.message && <p className="text-[10px] mt-1 italic opacity-80">{phStatus.message}</p>}
+                                <div className="flex justify-between items-center"><span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase">pH Eau</span><strong className="text-xs sm:text-sm">{obs.data.phValue || '-'}</strong></div>
                             </div>
                             <div className={`p-2 rounded border-l-4 ${unifStatus.style.replace('border ', '').replace('w-full', '')} bg-white shadow-sm`}>
-                                <div className="flex justify-between"><span className="text-xs font-bold text-gray-500 uppercase">Uniformité</span><strong>{obs.data.uniformite || '-'}</strong></div>
-                                {unifStatus.message && <p className="text-[10px] mt-1 italic opacity-80">{unifStatus.message}</p>}
-                            </div>
-                            <div className={`p-2 rounded border-l-4 ${cvStatus.style.replace('border ', '').replace('w-full', '')} bg-white shadow-sm`}>
-                                <div className="flex justify-between"><span className="text-xs font-bold text-gray-500 uppercase">CV</span><strong>{obs.data.cv || '-'}</strong></div>
-                                {cvStatus.message && <p className="text-[10px] mt-1 italic opacity-80">{cvStatus.message}</p>}
+                                <div className="flex justify-between items-center"><span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase">Unif.</span><strong className="text-xs sm:text-sm">{obs.data.uniformite || '-'}</strong></div>
                             </div>
                             <div className={`p-2 rounded border-l-4 bg-white shadow-sm ${obs.data.waterConsumptionIncrease === 'no' ? 'border-red-500' : 'border-green-500'}`}>
-                                <div className="flex justify-between mb-1"><span className="text-xs font-bold text-gray-500 uppercase">Conso Eau</span><strong>{obs.data.waterConsumptionIncrease === 'no' ? '↘️ BAISSE !' : '✅ Stable'}</strong></div>
+                                <div className="flex justify-between items-center"><span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase">Conso Eau</span><strong className="text-xs sm:text-sm">{obs.data.waterConsumptionIncrease === 'no' ? '↘️ BAISSE' : '✅ Stable'}</strong></div>
                             </div>
                         </div>
                     </div>
@@ -250,17 +253,31 @@ export const ObservationDetails = ({ obs, flock, building, visit, onEdit, onClos
                         </div>
                     )}
 
-                    {/* ✅ Affichage des Problèmes DÉTECTÉS */}
-                    {(obs.observation || obs.recommendations || obs.problems || (obs.detectedProblems && obs.detectedProblems.length > 0)) && (
+                    {/* ✅ SECTION PHOTOS (NOUVEAU) */}
+                    {obs.photos && obs.photos.length > 0 && (
+                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                            <h5 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2">
+                                📸 Photos ({obs.photos.length})
+                            </h5>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                {obs.photos.map((photo: any, idx: number) => (
+                                    <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 shadow-sm bg-white cursor-pointer group">
+                                        {/* Utilisation de l'API_URL pour les chemins relatifs */}
+                                        <img 
+                                            src={photo.contentUrl?.startsWith('http') ? photo.contentUrl : `${API_URL}${photo.contentUrl}`} 
+                                            alt={`Observation ${idx + 1}`} 
+                                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                                            loading="lazy"
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Observations & Problèmes */}
+                    {(obs.observation || obs.recommendations || obs.problems || (obs.detectedProblems && obs.detectedProblems.length > 0) || (obs.resolvedProblems && obs.resolvedProblems.length > 0)) && (
                         <div className="border-t border-gray-200 pt-4 space-y-3">
-                            {/* Ancien champ texte */}
-                            {obs.problems && (
-                                <div className="p-3 bg-red-100 text-red-900 rounded text-sm">
-                                    <strong className="block mb-1">⛔ PROBLÈMES (Note):</strong> 
-                                    <p className="whitespace-pre-wrap">{obs.problems}</p>
-                                </div>
-                            )}
-                            
                             {/* Nouveaux problèmes structurés */}
                             {obs.detectedProblems && obs.detectedProblems.length > 0 && (
                                 <div className="p-3 bg-red-100 text-red-900 rounded text-sm">
@@ -276,7 +293,7 @@ export const ObservationDetails = ({ obs, flock, building, visit, onEdit, onClos
                                 </div>
                             )}
 
-                            {/* ✅ Affichage des Problèmes RÉSOLUS */}
+                            {/* Problèmes Résolus */}
                             {obs.resolvedProblems && obs.resolvedProblems.length > 0 && (
                                 <div className="p-3 bg-green-100 text-green-900 rounded text-sm border border-green-200">
                                     <strong className="block mb-2">✅ PROBLÈMES RÉSOLUS :</strong> 
@@ -303,13 +320,13 @@ export const ObservationDetails = ({ obs, flock, building, visit, onEdit, onClos
                         </div>
                     )}
 
-                    {/* Boutons Actions */}
+                    {/* Boutons Actions - Optimisé Mobile */}
                     {!isModal && (
-                        <div className="flex gap-2 pt-4 border-t mt-4 no-print overflow-x-auto">
-                            <button onClick={shareWhatsApp} className="flex-1 py-3 px-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold text-xs flex justify-center items-center gap-1 min-w-[90px] shadow-sm active:scale-95 transition"><span>📱</span> WhatsApp</button>
-                            <button onClick={shareSMS} className="flex-1 py-3 px-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-bold text-xs flex justify-center items-center gap-1 min-w-[90px] shadow-sm active:scale-95 transition"><span>💬</span> SMS</button>
-                            <button onClick={handlePrint} className="flex-1 py-3 px-3 bg-gray-700 text-white rounded-lg hover:bg-gray-800 font-bold text-xs flex justify-center items-center gap-1 min-w-[90px] shadow-sm active:scale-95 transition"><span>🖨️</span> Imprimer</button>
-                            {onEdit && <button onClick={onEdit} className="py-3 px-4 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 font-bold text-xs flex items-center gap-1 border border-gray-200 shadow-sm active:scale-95 transition"><span>✏️</span> Éditer</button>}
+                        <div className="flex flex-wrap sm:flex-nowrap gap-2 pt-4 border-t mt-4 no-print">
+                            <button onClick={shareWhatsApp} className="flex-1 py-3 px-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold text-xs flex justify-center items-center gap-1 min-w-[100px] shadow-sm active:scale-95 transition"><span>📱</span> WhatsApp</button>
+                            <button onClick={shareSMS} className="flex-1 py-3 px-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-bold text-xs flex justify-center items-center gap-1 min-w-[80px] shadow-sm active:scale-95 transition"><span>💬</span> SMS</button>
+                            <button onClick={handlePrint} className="flex-1 py-3 px-3 bg-gray-700 text-white rounded-lg hover:bg-gray-800 font-bold text-xs flex justify-center items-center gap-1 min-w-[80px] shadow-sm active:scale-95 transition"><span>🖨️</span> Print</button>
+                            {onEdit && <button onClick={onEdit} className="w-full sm:w-auto py-3 px-4 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 font-bold text-xs flex items-center justify-center gap-1 border border-gray-200 shadow-sm active:scale-95 transition"><span>✏️</span> Éditer</button>}
                         </div>
                     )}
                 </div>
