@@ -1386,6 +1386,24 @@ export const ObservationForm = ({
                         />
                     </div>
 
+                    <div>
+                        <label className="block text-xs font-bold text-green-600 uppercase mb-1">
+                            Recommandations & Actions
+                        </label>
+                        <textarea
+                            className="w-full border p-3 rounded-lg text-base sm:text-sm focus:ring-2 focus:ring-green-500 outline-none"
+                            rows={3}
+                            placeholder="Conseils donnés, traitements à appliquer, ajustements..."
+                            value={common.recommendations}
+                            onChange={(e) =>
+                                setCommon({
+                                    ...common,
+                                    recommendations: e.target.value,
+                                })
+                            }
+                        />
+                    </div>
+
                     <div className="border border-red-100 rounded-lg overflow-hidden">
                         {existingOpenProblems.length > 0 && (
                             <div className="bg-orange-50 p-3 border-b border-orange-100">

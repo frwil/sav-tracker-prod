@@ -14,16 +14,21 @@
     "@tanstack/query-sync-storage-persister": "^5.90.22",
     "@tanstack/react-query-devtools": "^5.91.3",
     "@tanstack/react-query-persist-client": "^5.90.22",
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
+    "html-to-image": "^1.11.13",
+    "jspdf": "^4.1.0",
     "localforage": "^1.10.0",
     "next": "^16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-hot-toast": "^2.6.0",
     "react-select": "^5.10.2",
-    "xlsx": "^0.18.5"
+    "recharts": "^3.7.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/file-saver": "^2.0.7",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

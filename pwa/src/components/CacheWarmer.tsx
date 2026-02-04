@@ -11,6 +11,15 @@ const CRITICAL_ROUTES = [
     "/dashboard/visits",
     "/dashboard/visits/new",
     "/dashboard/buildings",
+    "/dashboard/prospections",
+    "/dashboard/prospections/new",
+    "/dashboard/reports",
+    "/dashboard/settings",
+    "/dashboard/reports/performance",
+    "/dashboard/reports/visites",
+    "/dashboard/reports/commercial",
+    "/dashboard/reports/forecast",
+    "/dashboard/reports/aliment",
     // Ajoutez d'autres routes si nécessaire
 ];
 
