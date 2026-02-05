@@ -27,7 +27,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 export default function NewVisitPage() {
     const router = useRouter();
     const { addToQueue } = useSync();
-    const { options: customerOptions, loading: customersLoading } = useCustomers();
+    const { options: customerOptions, loading: customersLoading, refetch } = useCustomers(); // Supposant que le hook expose refetch
 
     const [step, setStep] = useState<1 | 2 | 3>(1);
     
@@ -47,15 +47,87 @@ export default function NewVisitPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
 
-    // --- 1. DÉTECTION AUTOMATIQUE ---
+    // --- ÉTATS POUR LE MODAL NOUVEAU CLIENT ---
+    const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+    const [newClientData, setNewClientData] = useState({ name: '', phone: '', zone: '', gps: '', erpCode: '' });
+    const [isGeolocatingClient, setIsGeolocatingClient] = useState(false);
+
+    // --- LOGIQUE CRÉATION CLIENT ---
+    const handleGeolocateClient = () => {
+        setIsGeolocatingClient(true);
+        if ('geolocation' in navigator) {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    setNewClientData(prev => ({ ...prev, gps: `${pos.coords.latitude}, ${pos.coords.longitude}` }));
+                    setIsGeolocatingClient(false);
+                    toast.success("Position GPS trouvée !");
+                },
+                () => { toast.error("Erreur GPS"); setIsGeolocatingClient(false); }
+            );
+        } else {
+            toast.error("GPS non supporté");
+            setIsGeolocatingClient(false);
+        }
+    };
+
+    const handleCreateClient = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newClientData.name || !newClientData.zone) {
+            toast.error("Le Nom et la Zone sont obligatoires.");
+            return;
+        }
+
+        try {
+            const token = localStorage.getItem("sav_token");
+            const res = await fetch(`${API_URL}/customers`, {
+                method: "POST",
+                headers: { 
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    name: newClientData.name,
+                    phoneNumber: newClientData.phone,
+                    zone: newClientData.zone,
+                    exactLocation: newClientData.gps,
+                    erpCode: newClientData.erpCode,
+                    activated: true,
+                    status: 'CLIENT' // On considère qu'une visite se fait chez un client
+                })
+            });
+
+            if (!res.ok) throw new Error("Erreur lors de la création");
+            
+            const createdClient = await res.json();
+            
+            // ✅ SÉLECTION AUTOMATIQUE
+            const newOption: CustomerOption = {
+                value: createdClient['@id'],
+                label: `${createdClient.name} (${createdClient.zone})`
+            };
+            
+            setSelectedCustomer(newOption);
+            
+            // Si possible, on rafraichit la liste en arrière plan
+            if (typeof refetch === 'function') refetch();
+
+            toast.success("Client créé et sélectionné !");
+            setIsClientModalOpen(false);
+            setNewClientData({ name: '', phone: '', zone: '', gps: '', erpCode: '' });
+
+        } catch (e) {
+            console.error(e);
+            toast.error("Impossible de créer le client.");
+        }
+    };
+
+    // --- 1. DÉTECTION AUTOMATIQUE (Visite en cours) ---
     useEffect(() => {
         const checkExistingVisit = async () => {
             if (!selectedCustomer) {
                 setActiveVisit(null);
                 return;
             }
-
-            // OFFLINE : On ne peut pas vérifier les doublons serveur
             if (!navigator.onLine) return;
 
             setCheckingStatus(true);
@@ -91,11 +163,11 @@ export default function NewVisitPage() {
         checkExistingVisit();
     }, [selectedCustomer]);
 
-    // --- 2. GÉOLOCALISATION AUTOMATIQUE (Dès l'arrivée sur l'étape 3) ---
+    // --- 2. GÉOLOCALISATION VISITE (Étape 3) ---
     useEffect(() => {
         if (step === 3) {
             setIsGeolocating(true);
-            setGpsCoordinates(''); // Reset avant nouvelle tentative
+            setGpsCoordinates('');
 
             if ('geolocation' in navigator) {
                 navigator.geolocation.getCurrentPosition(
@@ -104,7 +176,6 @@ export default function NewVisitPage() {
                         setIsGeolocating(false);
                     },
                     (err) => {
-                        console.warn("Erreur GPS:", err);
                         setGpsCoordinates("Non détecté (Erreur GPS)");
                         setIsGeolocating(false);
                     },
@@ -115,14 +186,13 @@ export default function NewVisitPage() {
                 setIsGeolocating(false);
             }
         }
-    }, [step]); // Se déclenche quand on arrive à l'étape 3
+    }, [step]);
 
     // --- 3. NAVIGATION ET HISTORIQUE ---
     const handleNextStep = async () => {
         if (!selectedCustomer) return;
         if (activeVisit) return;
 
-        // OFFLINE : Sauter l'étape historique
         if (!navigator.onLine) {
             setLastVisit(null); 
             setStep(3); 
@@ -143,15 +213,11 @@ export default function NewVisitPage() {
                 if (lastVisits.length > 0) {
                     const lv = lastVisits[0];
                     let problems: any[] = [];
-                    if (lv.observations && lv.observations.length > 0) {
+                    if (lv.observations) {
                         lv.observations.forEach((obs: any) => {
                             if (obs.problems) problems.push(obs.problems);
                             if (obs.detectedProblems) {
-                                obs.detectedProblems.forEach((p: any) => problems.push({
-                                    description: p.description,
-                                    severity: p.severity,
-                                    status: p.status
-                                }));
+                                obs.detectedProblems.forEach((p: any) => problems.push(p));
                             }
                         });
                     }
@@ -160,7 +226,7 @@ export default function NewVisitPage() {
                         date: new Date(lv.createdAt || lv.visitedAt).toLocaleDateString('fr-FR'),
                         tech: lv.technician?.fullname || lv.technician?.username || 'Inconnu',
                         problems: problems,
-                        recommendations: lv.report || "Aucune recommandation enregistrée."
+                        recommendations: lv.report || "Aucune recommandation."
                     });
                     
                     const newChecklist = problems.map((p: any, idx: number) => ({
@@ -169,20 +235,17 @@ export default function NewVisitPage() {
                         status: 'unresolved' as const
                     }));
 
-                    if (newChecklist.length === 0) {
-                        newChecklist.push({ id: 0, text: "Vérifier l'application des recommandations", status: 'unresolved' });
-                    }
+                    if (newChecklist.length === 0) newChecklist.push({ id: 0, text: "Vérifier l'application des recommandations", status: 'unresolved' });
 
                     setChecklist(newChecklist);
                     setStep(2);
                 } else {
-                    setStep(3); // Pas d'historique
+                    setStep(3);
                 }
             } else {
                 setStep(3);
             }
         } catch (err) {
-            console.error("Erreur historique", err);
             setStep(3);
         }
     };
@@ -192,7 +255,7 @@ export default function NewVisitPage() {
         e.preventDefault();
         
         if (!objective || objective.trim().length === 0) {
-            setError("L'objectif de la visite est obligatoire.");
+            setError("L'objectif est obligatoire.");
             return;
         }
 
@@ -213,15 +276,7 @@ export default function NewVisitPage() {
 
         if (!navigator.onLine) {
             addToQueue({ url, method, body: payload });
-            toast("🌐 Mode Hors-Ligne : Visite créée localement.",{
-                icon: "🌐",
-                style: {
-                    borderRadius: "10px",
-                    background: "#3b82f6", // Bleu pour info
-                    color: "#fff",
-                },
-                duration: 4000,
-            });
+            toast("🌐 Hors-ligne : Visite créée localement.", { icon: "🌐", style: { background: "#3b82f6", color: "#fff" } });
             router.push('/dashboard/visits');
             return;
         }
@@ -236,30 +291,70 @@ export default function NewVisitPage() {
 
             if (!res.ok) {
                 const errorData = await res.json().catch(() => ({}));
-                const errorMessage = errorData['hydra:description'] || 'Erreur lors de la création';
-                throw new Error(errorMessage);
+                throw new Error(errorData['hydra:description'] || 'Erreur création');
             }
 
             router.push('/dashboard/visits');
 
         } catch (err: any) {
-            console.error(err);
             addToQueue({ url, method, body: payload });
-            toast("⚠️ Problème connexion. Visite sauvegardée hors-ligne.",{
-                icon: "⚠️",
-                style: {
-                    borderRadius: "10px",
-                    background: "#f59e0b", // Orange pour avertissement
-                    color: "#fff",
-                },
-                duration: 4000,
-            });
+            toast("⚠️ Erreur réseau. Sauvegardé hors-ligne.", { icon: "⚠️", style: { background: "#f59e0b", color: "#fff" } });
             router.push('/dashboard/visits');
         }
     };
 
     return (
-        <div className="max-w-3xl mx-auto space-y-6 pb-20">
+        <div className="max-w-3xl mx-auto space-y-6 pb-20 relative">
+            
+            {/* --- MODAL CRÉATION CLIENT --- */}
+            {isClientModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 relative flex flex-col max-h-[90vh]">
+                        <button onClick={() => setIsClientModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold">✕</button>
+                        
+                        <h3 className="text-xl font-bold mb-4 text-gray-800">Nouveau Client</h3>
+                        
+                        <form onSubmit={handleCreateClient} className="space-y-4 overflow-y-auto p-1">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Nom *</label>
+                                <input required className="w-full border rounded p-2" placeholder="Nom complet" value={newClientData.name} onChange={e => setNewClientData({...newClientData, name: e.target.value})} />
+                            </div>
+                            
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Zone / Ville *</label>
+                                <input required className="w-full border rounded p-2" placeholder="Quartier..." value={newClientData.zone} onChange={e => setNewClientData({...newClientData, zone: e.target.value})} />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Téléphone</label>
+                                    <input type="tel" className="w-full border rounded p-2" placeholder="6..." value={newClientData.phone} onChange={e => setNewClientData({...newClientData, phone: e.target.value})} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Code ERP</label>
+                                    <input className="w-full border rounded p-2" placeholder="Optionnel" value={newClientData.erpCode} onChange={e => setNewClientData({...newClientData, erpCode: e.target.value})} />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Localisation</label>
+                                <div className="flex gap-2">
+                                    <input className="w-full border rounded p-2 bg-gray-50" placeholder="Coordonnées..." readOnly value={newClientData.gps} />
+                                    <button type="button" onClick={handleGeolocateClient} disabled={isGeolocatingClient} className="bg-gray-100 px-3 rounded hover:bg-gray-200 border border-gray-300">
+                                        {isGeolocatingClient ? '...' : '📍'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+                                <button type="button" onClick={() => setIsClientModalOpen(false)} className="px-4 py-2 text-gray-600 font-bold hover:bg-gray-100 rounded">Annuler</button>
+                                <button type="submit" className="px-6 py-2 bg-indigo-600 text-white font-bold rounded hover:bg-indigo-700 shadow-md">Créer</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+            <Link href="/dashboard/visits" className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1">&larr; Retour aux visites</Link>
             <h1 className="text-2xl font-bold text-gray-900">Nouvelle Visite</h1>
 
             {/* Barre de progression */}
@@ -273,15 +368,29 @@ export default function NewVisitPage() {
             {step === 1 && (
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 animate-in fade-in">
                     <label className="block text-sm font-bold text-gray-700 mb-2">Sélectionner le Client</label>
-                    <Select
-                        className="mb-6"
-                        options={customerOptions}
-                        isLoading={customersLoading}
-                        value={selectedCustomer}
-                        onChange={setSelectedCustomer}
-                        placeholder="Rechercher un client..."
-                        isDisabled={checkingStatus}
-                    />
+                    
+                    {/* ✅ INPUT GROUP : SELECT + BOUTON CRÉATION */}
+                    <div className="flex gap-2 mb-6">
+                        <div className="flex-1">
+                            <Select
+                                options={customerOptions}
+                                isLoading={customersLoading}
+                                value={selectedCustomer}
+                                onChange={setSelectedCustomer}
+                                placeholder="Rechercher un client..."
+                                isDisabled={checkingStatus}
+                                className="text-sm"
+                            />
+                        </div>
+                        <button 
+                            onClick={() => setIsClientModalOpen(true)}
+                            className="bg-indigo-50 border border-indigo-200 text-indigo-700 px-4 rounded font-bold hover:bg-indigo-100 transition flex items-center justify-center text-xl"
+                            title="Créer un nouveau client"
+                        >
+                            +
+                        </button>
+                    </div>
+
                     {checkingStatus && <p className="text-sm text-gray-500 animate-pulse mb-4">🔍 Vérification...</p>}
                     
                     {activeVisit ? (
@@ -309,7 +418,7 @@ export default function NewVisitPage() {
                 </div>
             )}
 
-            {/* ÉTAPE 2 : REVUE HISTORIQUE */}
+            {/* ÉTAPE 2 : REVUE HISTORIQUE (Inchangé) */}
             {step === 2 && lastVisit && (
                 <div className="bg-white p-6 rounded-xl shadow-sm space-y-6 animate-in slide-in-from-right-4">
                     <h2 className="text-lg font-semibold">2. Revue de la dernière visite</h2>
@@ -353,7 +462,7 @@ export default function NewVisitPage() {
                 </div>
             )}
 
-            {/* ÉTAPE 3 : FORMULAIRE FINAL */}
+            {/* ÉTAPE 3 : FORMULAIRE FINAL (Inchangé) */}
             {step === 3 && (
                 <div className="bg-white p-6 rounded-xl shadow-sm space-y-6 animate-in slide-in-from-right-4">
                     <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -376,7 +485,6 @@ export default function NewVisitPage() {
                             />
                         </div>
                         
-                        {/* --- GPS AUTOMATIQUE --- */}
                         <div>
                             <label className="block text-sm font-bold text-gray-700 mb-2">Position GPS</label>
                             <div className="relative">
@@ -388,7 +496,6 @@ export default function NewVisitPage() {
                                     }`}
                                     value={isGeolocating ? "Localisation en cours..." : gpsCoordinates || "En attente..."} 
                                 />
-                                {/* Icône de statut à droite */}
                                 <div className="absolute right-3 top-2">
                                     {isGeolocating ? (
                                         <span className="animate-spin block">⏳</span>

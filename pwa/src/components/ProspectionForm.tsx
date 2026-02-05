@@ -1,28 +1,43 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Select from "react-select";
 import { useSync } from "@/providers/SyncProvider";
 import { compressImage } from "@/utils/imageCompressor";
 import toast from "react-hot-toast";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
+interface Customer {
+    id: string | number;
+    '@id': string;
+    name: string;
+    phoneNumber: string;
+    zone: string;
+    exactLocation?: string;
+    status?: string;
+}
+
 export default function ProspectionForm() {
     const router = useRouter();
     const { addToQueue } = useSync();
     
-    // --- ÉTATS ---
+    // --- ÉTATS NAVIGATION & MODE ---
     const [step, setStep] = useState(1);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [mode, setMode] = useState<'PROSPECTION' | 'CONSULTATION'>('PROSPECTION');
+
+    // --- ÉTATS CLIENTS ---
+    const [customers, setCustomers] = useState<Customer[]>([]);
+    const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+    const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+    const [newClientData, setNewClientData] = useState({ name: '', phone: '', zone: '', gps: '' });
     const [isGeolocating, setIsGeolocating] = useState(false);
 
-    // Données principales
+    // --- DONNÉES MÉTIER (ÉTAPE 2, 3, 4) ---
+    // Note: Les infos nom/tel sont maintenant dans 'selectedCustomer'
     const [formData, setFormData] = useState({
-        prospectName: "",
-        phoneNumber: "",
-        locationLabel: "",
-        gpsCoordinates: "",
         concerns: "",
         expectations: "",
         interventionDone: false,
@@ -32,79 +47,118 @@ export default function ProspectionForm() {
         appointmentReason: "VISITE_FERME",
     });
 
-    // Activités dynamiques
     const [activities, setActivities] = useState<{spec: string, bat: number, eff: number}[]>([]);
     const [tempAct, setTempAct] = useState({ spec: "Poulet de Chair", bat: 1, eff: 1000 });
-
-    // Photos
     const [photos, setPhotos] = useState<{ content: string; filename: string }[]>([]);
     const [isCompressing, setIsCompressing] = useState(false);
 
-    // --- LOGIQUE DE VALIDATION ---
-    const isStepValid = (currentStep: number) => {
-        switch (currentStep) {
-            case 1: // Contact
-                return (
-                    formData.prospectName.trim() !== "" &&
-                    formData.phoneNumber.trim() !== "" &&
-                    formData.locationLabel.trim() !== ""
-                );
-            case 2: // Activités
-                return activities.length > 0;
-            case 3: // Diagnostic
-                const basicDiagnostic = formData.concerns.trim() !== "" && formData.expectations.trim() !== "";
-                if (formData.interventionDone) {
-                    return basicDiagnostic && formData.interventionComments.trim() !== "";
+    // 1. CHARGEMENT CLIENTS
+    useEffect(() => {
+        const fetchCustomers = async () => {
+            if (!navigator.onLine) return;
+            try {
+                const token = localStorage.getItem("sav_token");
+                const res = await fetch(`${API_URL}/customers?pagination=false`, {
+                    headers: { "Authorization": `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setCustomers(data['hydra:member'] || data['member'] || []);
                 }
-                return basicDiagnostic;
-            case 4: // Conclusion
-                if (formData.appointmentTaken) {
-                    return formData.appointmentDate.trim() !== "";
-                }
-                return true;
-            default:
-                return false;
+            } catch (e) { console.error("Erreur chargement clients", e); }
+        };
+        fetchCustomers();
+    }, []);
+
+    // 2. CRÉATION CLIENT / PROSPECT (MODAL)
+    const handleCreateClient = async () => {
+        if (!newClientData.name || !newClientData.phone || !newClientData.zone) {
+            toast.error("Veuillez remplir Nom, Téléphone et Zone.");
+            return;
+        }
+
+        const duplicate = customers.find(c => c.phoneNumber === newClientData.phone);
+        if (duplicate) {
+            toast.error(`Numéro déjà utilisé par : ${duplicate.name}`);
+            return;
+        }
+
+        try {
+            const token = localStorage.getItem("sav_token");
+            
+            // LOGIQUE DE STATUT :
+            // Si on est en mode "Prospection", on crée un "PROSPECT".
+            // Si on est en "Consultation", on peut aussi créer un "PROSPECT" (consultation avant-vente).
+            const status = 'PROSPECT'; 
+
+            const res = await fetch(`${API_URL}/customers`, {
+                method: "POST",
+                headers: { 
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    name: newClientData.name,
+                    phoneNumber: newClientData.phone,
+                    zone: newClientData.zone,
+                    exactLocation: newClientData.gps,
+                    activated: true,
+                    status: status
+                })
+            });
+
+            if (!res.ok) throw new Error("Erreur création fiche");
+            
+            const createdClient = await res.json();
+            
+            // Mise à jour locale
+            const newObj = {
+                id: createdClient.id,
+                '@id': createdClient['@id'],
+                name: createdClient.name,
+                phoneNumber: createdClient.phoneNumber,
+                zone: createdClient.zone,
+                exactLocation: createdClient.exactLocation,
+                status: status
+            };
+
+            setCustomers(prev => [...prev, newObj]);
+            // Sélection automatique
+            setSelectedCustomer({ value: newObj['@id'], label: `${newObj.name} (${newObj.phoneNumber})`, customer: newObj });
+            setIsClientModalOpen(false);
+            setNewClientData({ name: '', phone: '', zone: '', gps: '' });
+            toast.success("Fiche créée et sélectionnée !");
+
+        } catch (e) {
+            toast.error("Impossible de créer la fiche (Erreur API)");
         }
     };
 
-    // --- HANDLERS ---
-    const updateField = (field: string, value: any) => {
-        setFormData(prev => ({ ...prev, [field]: value }));
-    };
-
-    // Géolocalisation
+    // Géolocalisation (pour la fiche client)
     const handleGeolocate = () => {
         setIsGeolocating(true);
         if ('geolocation' in navigator) {
             navigator.geolocation.getCurrentPosition(
                 (pos) => {
-                    updateField("gpsCoordinates", `${pos.coords.latitude}, ${pos.coords.longitude}`);
+                    setNewClientData(prev => ({ ...prev, gps: `${pos.coords.latitude}, ${pos.coords.longitude}` }));
                     setIsGeolocating(false);
-                    toast.success("Position GPS trouvée !");
+                    toast.success("GPS trouvé !");
                 },
-                (err) => {
-                    toast.error("Erreur GPS: " + err.message);
-                    setIsGeolocating(false);
-                },
-                { enableHighAccuracy: true }
+                () => { toast.error("Erreur GPS"); setIsGeolocating(false); }
             );
         } else {
-            toast.error("GPS non supporté");
             setIsGeolocating(false);
         }
     };
 
-    // Gestion Activités
+    // --- HANDLERS ÉTAPES SUIVANTES ---
     const addActivity = () => {
         setActivities([...activities, tempAct]);
         setTempAct({ spec: "Poulet de Chair", bat: 1, eff: 1000 });
         toast.success("Activité ajoutée");
     };
-    const removeActivity = (idx: number) => {
-        setActivities(activities.filter((_, i) => i !== idx));
-    };
+    const removeActivity = (idx: number) => setActivities(activities.filter((_, i) => i !== idx));
 
-    // Gestion Photos
     const handlePhotoAdd = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             setIsCompressing(true);
@@ -112,400 +166,272 @@ export default function ProspectionForm() {
                 const file = e.target.files[0];
                 const compressed = await compressImage(file);
                 setPhotos(prev => [...prev, { content: compressed, filename: file.name }]);
-                toast.success("Photo ajoutée");
-            } catch (e) {
-                toast.error("Erreur photo");
-            } finally {
-                setIsCompressing(false);
-            }
+            } catch (e) { toast.error("Erreur photo"); } 
+            finally { setIsCompressing(false); }
         }
     };
 
-    // --- SOUMISSION ROBUSTE ---
-    const handleSubmit = async () => {
-        if (!isStepValid(4)) {
-            return toast.error("Veuillez remplir les informations de rendez-vous ou décocher l'option.");
+    const updateField = (field: string, value: any) => setFormData(p => ({ ...p, [field]: value }));
+
+    // VALIDATION
+    const isStepValid = (currentStep: number) => {
+        if (currentStep === 1) return !!selectedCustomer; // Client obligatoire
+        if (currentStep === 2) return activities.length > 0;
+        if (currentStep === 3) {
+            const diag = formData.concerns.trim() !== "" && formData.expectations.trim() !== "";
+            if (formData.interventionDone) return diag && formData.interventionComments.trim() !== "";
+            return diag;
         }
-        
+        if (currentStep === 4) {
+            if (formData.appointmentTaken) return formData.appointmentDate.trim() !== "";
+            return true;
+        }
+        return false;
+    };
+
+    // --- SOUMISSION FINALE ---
+    const handleSubmit = async () => {
+        if (!isStepValid(4)) return toast.error("Formulaire incomplet.");
         setIsSubmitting(true);
+        
         const token = localStorage.getItem("sav_token");
-
-        const formattedAppointmentDate = (formData.appointmentTaken && formData.appointmentDate)
-            ? new Date(formData.appointmentDate).toISOString() // Convertit l'input datetime-local en ISO complet
-            : null;
-
-        const payload = {
-            ...formData,
+        
+        // Aiguillage Endpoint
+        const endpoint = mode === 'CONSULTATION' ? '/consultations' : '/prospections';
+        
+        // Préparation Payload
+        const commonPayload = {
             date: new Date().toISOString(),
             farmDetails: activities,
-            newPhotos: photos,
-            technician: undefined,
-            appointmentDate: formattedAppointmentDate
+            concerns: formData.concerns,
+            expectations: formData.expectations,
+            interventionDone: formData.interventionDone,
+            interventionComments: formData.interventionComments,
+            appointmentTaken: formData.appointmentTaken,
+            appointmentDate: formData.appointmentTaken && formData.appointmentDate ? new Date(formData.appointmentDate).toISOString() : null,
+            appointmentReason: formData.appointmentReason,
+            newPhotos: photos
         };
 
-        const url = "/prospections";
-        const method = "POST";
+        // Adaptation selon l'entité cible
+        let payload: any;
+        if (mode === 'CONSULTATION') {
+            payload = {
+                ...commonPayload,
+                customer: selectedCustomer.value // Relation pour Consultation
+            };
+        } else {
+            payload = {
+                ...commonPayload,
+                client: selectedCustomer.value, // Relation pour Prospection
+                status: 'NEW' // Workflow spécifique Prospection
+            };
+        }
 
-        // 1. VÉRIFICATION PRÉALABLE HORS LIGNE
         if (!navigator.onLine) {
-            addToQueue({ url, method, body: payload });
-            toast("🌐 Mode Hors Ligne : Sauvegardé en attente !", {
-                icon: "💾",
-                style: { background: "#F59E0B", color: "#fff" }
-            });
+            addToQueue({ url: endpoint, method: "POST", body: payload });
+            toast("🌐 Hors ligne : Sauvegardé en attente !", { icon: "💾", style: { background: "#F59E0B", color: "#fff" }});
             router.push("/dashboard");
             return;
         }
 
         try {
-            const res = await fetch(`${API_URL}${url}`, {
-                method,
-                headers: { 
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
+            const res = await fetch(`${API_URL}${endpoint}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
                 body: JSON.stringify(payload)
             });
 
-            // 2. GESTION DES ERREURS API (4xx, 5xx)
-            // Si le serveur répond (même avec une erreur), ce n'est PAS un problème réseau.
             if (!res.ok) {
-                const errorData = await res.json().catch(() => ({}));
-                // On récupère le message d'erreur précis envoyé par l'API (ex: "Nom obligatoire")
-                const errorMessage = errorData['hydra:description'] || errorData['description'] || errorData.message || `Erreur serveur (${res.status})`;
-                throw new Error(errorMessage); 
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err['hydra:description'] || err.message || `Erreur ${res.status}`);
             }
 
-            toast.success("Prospection enregistrée avec succès ! 🚀");
+            toast.success(mode === 'CONSULTATION' ? "Consultation enregistrée !" : "Prospection créée !");
             router.push("/dashboard");
 
         } catch (e: any) {
-            console.error("Erreur soumission :", e);
-
-            // 3. DISTINCTION CRITIQUE : RÉSEAU vs API
-            // Un TypeError sur fetch indique généralement un échec de connexion (DNS, Timeout, Coupure)
-            const isNetworkError = 
-                e instanceof TypeError || 
-                e.message === "Failed to fetch" || 
-                e.message.includes("NetworkError");
-
-            if (isNetworkError) {
-                // -> C'est une vraie coupure : ON SAUVEGARDE EN LOCAL
-                addToQueue({ url, method, body: payload });
-                toast("⚠️ Connexion perdue pendant l'envoi. Sauvegardé en local.", {
-                    icon: "📡",
-                    duration: 5000
-                });
+            const isNetwork = e instanceof TypeError || e.message.includes("NetworkError");
+            if (isNetwork) {
+                addToQueue({ url: endpoint, method: "POST", body: payload });
+                toast("⚠️ Connexion perdue. Sauvegardé.", { icon: "📡" });
                 router.push("/dashboard");
             } else {
-                // -> C'est une erreur de l'API (Validation, Doublon, etc.) : ON AFFICHE L'ERREUR
-                // On ne redirige pas, pour laisser l'utilisateur corriger.
-                toast.error(`❌ Échec : ${e.message}`, { duration: 5000 });
+                toast.error(`❌ Erreur : ${e.message}`);
             }
         } finally {
             setIsSubmitting(false);
         }
     };
 
-    // --- RENDER ---
     return (
-        <div className="max-w-md mx-auto bg-white min-h-screen sm:min-h-0 sm:rounded-xl shadow-sm overflow-hidden flex flex-col">
-            {/* Header Steps */}
+        <div className="max-w-md mx-auto bg-white min-h-screen sm:min-h-0 sm:rounded-xl shadow-sm overflow-hidden flex flex-col relative" style={{ minHeight:'500px',animation: 'fadeIn 0.3s' }}>
+            
+            {/* --- MODAL CRÉATION CLIENT --- */}
+            {isClientModalOpen && (
+                <div className="absolute inset-0 z-50 bg-white p-4 flex flex-col animate-in slide-in-from-bottom" style={{ minHeight:'500px' }}>
+                    <h3 className="font-bold text-lg mb-4 text-indigo-900">
+                        Nouveau Contact
+                    </h3>
+                    <div className="space-y-3 flex-1 overflow-y-auto">
+                        <input className="w-full border p-3 rounded" placeholder="Nom complet *" value={newClientData.name} onChange={e => setNewClientData({...newClientData, name: e.target.value})} />
+                        <input className="w-full border p-3 rounded" placeholder="Téléphone *" type="tel" value={newClientData.phone} onChange={e => setNewClientData({...newClientData, phone: e.target.value})} />
+                        <input className="w-full border p-3 rounded" placeholder="Zone / Quartier *" value={newClientData.zone} onChange={e => setNewClientData({...newClientData, zone: e.target.value})} />
+                        <div className="flex gap-2">
+                            <input className="flex-1 border p-3 rounded bg-gray-50" placeholder="GPS" readOnly value={newClientData.gps} />
+                            <button onClick={handleGeolocate} className="bg-gray-200 px-3 rounded text-xl">📍</button>
+                        </div>
+                    </div>
+                    <div className="flex gap-3 mt-4">
+                        <button onClick={() => setIsClientModalOpen(false)} className="flex-1 py-3 bg-gray-100 font-bold text-gray-600 rounded">Annuler</button>
+                        <button onClick={handleCreateClient} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded">Créer</button>
+                    </div>
+                </div>
+            )}
+
+            {/* --- HEADER --- */}
             <div className="bg-indigo-900 p-4 text-white flex justify-between items-center">
-                <h1 className="font-bold text-lg">Nouvelle Prospection</h1>
+                <h1 className="font-bold text-lg">{mode === 'PROSPECTION' ? 'Nouvelle Prospection' : 'Nouvelle Consultation'}</h1>
                 <div className="flex gap-1">
-                    {[1, 2, 3, 4].map(s => (
-                        <div key={s} className={`h-2 w-2 rounded-full ${step >= s ? 'bg-white' : 'bg-white/30'}`} />
-                    ))}
+                    {[1, 2, 3, 4].map(s => <div key={s} className={`h-2 w-2 rounded-full ${step >= s ? 'bg-white' : 'bg-white/30'}`} />)}
                 </div>
             </div>
 
             <div className="p-4 flex-1 overflow-y-auto space-y-6">
                 
-                {/* ÉTAPE 1: CONTACT */}
+                {/* --- ÉTAPE 1 : IDENTIFICATION --- */}
                 {step === 1 && (
                     <div className="space-y-4 animate-in slide-in-from-right">
-                        <h2 className="text-indigo-900 font-bold uppercase text-sm border-b pb-2">👤 Infos Contact</h2>
                         
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Nom du Prospect *</label>
-                            <input 
-                                type="text" className="w-full border p-3 rounded-lg text-base mt-1" 
-                                placeholder="Ex: M. Kouamé"
-                                value={formData.prospectName}
-                                onChange={e => updateField("prospectName", e.target.value)}
-                                required
-                            />
+                        {/* SÉLECTEUR DE MODE */}
+                        <div className="flex bg-gray-100 p-1 rounded-lg mb-4">
+                            <button onClick={() => { setMode('PROSPECTION'); setSelectedCustomer(null); }} className={`flex-1 py-2 text-xs font-bold rounded-md transition ${mode === 'PROSPECTION' ? 'bg-white text-indigo-900 shadow-sm' : 'text-gray-500'}`}>🔭 PROSPECTION</button>
+                            <button onClick={() => { setMode('CONSULTATION'); setSelectedCustomer(null); }} className={`flex-1 py-2 text-xs font-bold rounded-md transition ${mode === 'CONSULTATION' ? 'bg-white text-indigo-900 shadow-sm' : 'text-gray-500'}`}>🩺 CONSULTATION</button>
                         </div>
 
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Téléphone *</label>
-                            <input 
-                                type="tel" className="w-full border p-3 rounded-lg text-base mt-1" 
-                                placeholder="6..."
-                                value={formData.phoneNumber}
-                                onChange={e => updateField("phoneNumber", e.target.value)}
-                                required
+                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-4">
+                            <label className="text-xs font-bold text-blue-800 uppercase block">
+                                {mode === 'PROSPECTION' ? 'Qui prospectez-vous ?' : 'Quel client consultez-vous ?'}
+                            </label>
+                            
+                            <Select 
+                                options={customers.map(c => ({ value: c['@id'], label: `${c.name} (${c.phoneNumber})`, customer: c }))}
+                                value={selectedCustomer}
+                                onChange={setSelectedCustomer}
+                                placeholder="Rechercher nom ou numéro..."
+                                className={`text-sm ${mode === 'PROSPECTION' ? 'hidden' : 'block'}`} // En prospection, on cache le select pour forcer la création d'un prospect
+                                isClearable
                             />
+
+                            {mode !== 'PROSPECTION' && <div className="text-center text-xs text-blue-400 font-bold">- OU -</div>}
+
+                            <button 
+                                onClick={() => { setIsClientModalOpen(true); handleGeolocate(); }}
+                                className="w-full py-3 bg-white border-2 border-dashed border-blue-300 text-blue-600 font-bold rounded-lg hover:bg-blue-50 transition flex items-center justify-center gap-2"
+                            >
+                                <span>+</span> Créer une fiche Contact
+                            </button>
                         </div>
 
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Localisation (Quartier/Village) *</label>
-                            <input 
-                                type="text" className="w-full border p-3 rounded-lg text-base mt-1" 
-                                placeholder="Ex: Village Ndogbong"
-                                value={formData.locationLabel}
-                                onChange={e => updateField("locationLabel", e.target.value)}
-                                required
-                            />
-                        </div>
-
-                        <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                            <div className="flex justify-between items-center mb-2">
-                                <label className="text-xs font-bold text-gray-500 uppercase">GPS Exact</label>
-                                <button 
-                                    onClick={handleGeolocate} disabled={isGeolocating}
-                                    className="bg-indigo-100 text-indigo-700 text-xs px-3 py-1 rounded-full font-bold"
-                                >
-                                    {isGeolocating ? '...' : '📍 Localiser'}
-                                </button>
+                        {selectedCustomer && (
+                            <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm animate-in zoom-in-95">
+                                <div className="text-xs text-gray-400 uppercase font-bold mb-1">Sélectionné :</div>
+                                <div className="font-bold text-gray-800 text-lg">{selectedCustomer.customer.name}</div>
+                                <div className="text-sm text-gray-600">📞 {selectedCustomer.customer.phoneNumber}</div>
+                                <div className="text-sm text-gray-600">📍 {selectedCustomer.customer.zone}</div>
+                                <div className={`mt-2 inline-block px-2 py-1 text-[10px] rounded font-bold ${selectedCustomer.customer.status === 'CLIENT' ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'}`}>
+                                    {selectedCustomer.customer.status || 'PROSPECT'}
+                                </div>
                             </div>
-                            <input 
-                                type="text" readOnly className="w-full bg-white border p-2 rounded text-xs text-gray-600"
-                                value={formData.gpsCoordinates || "Non défini"}
-                            />
-                        </div>
+                        )}
                     </div>
                 )}
 
-                {/* ÉTAPE 2: ACTIVITÉS */}
+                {/* --- ÉTAPE 2 : ACTIVITÉS --- */}
                 {step === 2 && (
                     <div className="space-y-4 animate-in slide-in-from-right">
                         <h2 className="text-indigo-900 font-bold uppercase text-sm border-b pb-2">🚜 Ferme & Activités</h2>
-                        
-                        {/* Liste */}
-                        {activities.length > 0 ? (
-                            <div className="space-y-2">
-                                {activities.map((act, i) => (
-                                    <div key={i} className="flex justify-between items-center bg-green-50 p-3 rounded border border-green-100">
-                                        <div>
-                                            <p className="font-bold text-green-900 text-sm">{act.spec}</p>
-                                            <p className="text-xs text-green-700">{act.bat} Bâtiment(s) • {act.eff} Sujets</p>
-                                        </div>
-                                        <button onClick={() => removeActivity(i)} className="text-red-400 font-bold px-2">×</button>
-                                    </div>
-                                ))}
+                        {activities.map((act, i) => (
+                            <div key={i} className="flex justify-between items-center bg-green-50 p-3 rounded border border-green-100">
+                                <div><p className="font-bold text-green-900 text-sm">{act.spec}</p><p className="text-xs text-green-700">{act.bat} Bat • {act.eff} Sujets</p></div>
+                                <button onClick={() => removeActivity(i)} className="text-red-400 font-bold px-2">×</button>
                             </div>
-                        ) : (
-                            <div className="text-sm text-red-500 bg-red-50 p-3 rounded border border-red-100 italic text-center">
-                                Veuillez ajouter au moins une activité pour continuer.
-                            </div>
-                        )}
-
-                        {/* Ajout */}
+                        ))}
                         <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-3">
-                            <h4 className="text-xs font-bold text-gray-500 uppercase">Ajouter une activité</h4>
-                            <select 
-                                className="w-full p-2 border rounded text-sm bg-white h-[44px]"
-                                value={tempAct.spec}
-                                onChange={e => setTempAct({...tempAct, spec: e.target.value})}
-                            >
+                            <h4 className="text-xs font-bold text-gray-500 uppercase">Ajouter</h4>
+                            <select className="w-full p-2 border rounded text-sm bg-white" value={tempAct.spec} onChange={e => setTempAct({...tempAct, spec: e.target.value})}>
                                 <option value="Poulet de Chair">🐔 Poulet de Chair</option>
                                 <option value="Pondeuse">🥚 Pondeuse</option>
                                 <option value="Porc">🐷 Porc</option>
                                 <option value="Pisciculture">🐟 Pisciculture</option>
-                                <option value="Autre">🌱 Autre</option>
                             </select>
                             <div className="flex gap-2">
-                                <div className="flex-1">
-                                    <label className="text-[10px] text-gray-400 uppercase">Nb Bât.</label>
-                                    <input 
-                                        type="number" className="w-full p-2 border rounded text-sm h-[44px]"
-                                        value={tempAct.bat || 1}
-                                        onChange={e => setTempAct({...tempAct, bat: parseInt(e.target.value) || 0})}
-                                        min={1}
-                                        max={1}
-                                    />
-                                </div>
-                                <div className="flex-1">
-                                    <label className="text-[10px] text-gray-400 uppercase">Effectif</label>
-                                    <input 
-                                        type="number" className="w-full p-2 border rounded text-sm h-[44px]"
-                                        value={tempAct.eff}
-                                        onChange={e => setTempAct({...tempAct, eff: parseInt(e.target.value) || 0})}
-                                    />
-                                </div>
+                                <input type="number" className="flex-1 p-2 border rounded text-sm" value={tempAct.bat} onChange={e => setTempAct({...tempAct, bat: parseInt(e.target.value) || 0})} placeholder="Nb Bat" />
+                                <input type="number" className="flex-1 p-2 border rounded text-sm" value={tempAct.eff} onChange={e => setTempAct({...tempAct, eff: parseInt(e.target.value) || 0})} placeholder="Effectif" />
                             </div>
-                            <button 
-                                onClick={addActivity}
-                                className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg text-sm shadow-sm active:scale-95 transition"
-                            >
-                                + Ajouter
-                            </button>
+                            <button onClick={addActivity} className="w-full bg-indigo-600 text-white font-bold py-2 rounded text-sm">+ Ajouter</button>
                         </div>
                     </div>
                 )}
 
-                {/* ÉTAPE 3: DIAGNOSTIC */}
+                {/* --- ÉTAPE 3 : DIAGNOSTIC --- */}
                 {step === 3 && (
                     <div className="space-y-4 animate-in slide-in-from-right">
                         <h2 className="text-indigo-900 font-bold uppercase text-sm border-b pb-2">📋 Diagnostic</h2>
-
                         <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Préoccupations / Problèmes *</label>
-                            <textarea 
-                                className="w-full border p-3 rounded-lg text-sm mt-1 focus:ring-2 focus:ring-indigo-200"
-                                rows={3}
-                                placeholder="De quoi se plaint le prospect ?"
-                                value={formData.concerns}
-                                onChange={e => updateField("concerns", e.target.value)}
-                                required
-                            />
+                            <label className="text-xs font-bold text-gray-500 uppercase">Problèmes *</label>
+                            <textarea className="w-full border p-3 rounded text-sm" rows={3} value={formData.concerns} onChange={e => updateField("concerns", e.target.value)} required />
                         </div>
-
                         <div>
                             <label className="text-xs font-bold text-gray-500 uppercase">Attentes *</label>
-                            <textarea 
-                                className="w-full border p-3 rounded-lg text-sm mt-1 focus:ring-2 focus:ring-indigo-200"
-                                rows={2}
-                                placeholder="Que veut-il ?"
-                                value={formData.expectations}
-                                onChange={e => updateField("expectations", e.target.value)}
-                                required
-                            />
+                            <textarea className="w-full border p-3 rounded text-sm" rows={2} value={formData.expectations} onChange={e => updateField("expectations", e.target.value)} required />
                         </div>
-
-                        <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
-                            <label className="flex items-center gap-3">
-                                <input 
-                                    type="checkbox" className="w-5 h-5 text-orange-600 rounded"
-                                    checked={formData.interventionDone}
-                                    onChange={e => updateField("interventionDone", e.target.checked)}
-                                />
-                                <span className="text-sm font-bold text-orange-900">Une intervention a été faite ?</span>
-                            </label>
-                            
-                            {formData.interventionDone && (
-                                <textarea 
-                                    className="w-full border border-orange-200 p-2 rounded text-sm mt-3 bg-white"
-                                    rows={2}
-                                    placeholder="Détails de l'intervention technique... *"
-                                    value={formData.interventionComments}
-                                    onChange={e => updateField("interventionComments", e.target.value)}
-                                    required={formData.interventionDone}
-                                />
-                            )}
+                        <div className="bg-orange-50 p-3 rounded border border-orange-100">
+                            <label className="flex items-center gap-2"><input type="checkbox" checked={formData.interventionDone} onChange={e => updateField("interventionDone", e.target.checked)} /> <span className="text-sm font-bold text-orange-900">Intervention faite ?</span></label>
+                            {formData.interventionDone && <textarea className="w-full border p-2 rounded text-sm mt-2 bg-white" rows={2} placeholder="Détails..." value={formData.interventionComments} onChange={e => updateField("interventionComments", e.target.value)} />}
                         </div>
                     </div>
                 )}
 
-                {/* ÉTAPE 4: CONCLUSION */}
+                {/* --- ÉTAPE 4 : CONCLUSION --- */}
                 {step === 4 && (
                     <div className="space-y-6 animate-in slide-in-from-right">
                         <h2 className="text-indigo-900 font-bold uppercase text-sm border-b pb-2">🏁 Conclusion</h2>
-
-                        {/* Rendez-vous */}
                         <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                            <label className="flex items-center gap-3 mb-3">
-                                <input 
-                                    type="checkbox" className="w-5 h-5 text-blue-600 rounded"
-                                    checked={formData.appointmentTaken}
-                                    onChange={e => updateField("appointmentTaken", e.target.checked)}
-                                />
-                                <span className="text-sm font-bold text-blue-900">Rendez-vous pris ?</span>
-                            </label>
-                            
+                            <label className="flex items-center gap-2 mb-3"><input type="checkbox" checked={formData.appointmentTaken} onChange={e => updateField("appointmentTaken", e.target.checked)} /> <span className="text-sm font-bold text-blue-900">Rendez-vous pris ?</span></label>
                             {formData.appointmentTaken && (
-                                <div className="space-y-3 pl-1">
-                                    <div>
-                                        <label className="text-[10px] font-bold text-blue-400 uppercase">Date & Heure *</label>
-                                        <input 
-                                            type="datetime-local" 
-                                            className="w-full p-2 border border-blue-200 rounded text-sm bg-white"
-                                            value={formData.appointmentDate}
-                                            onChange={e => updateField("appointmentDate", e.target.value)}
-                                            required={formData.appointmentTaken}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-[10px] font-bold text-blue-400 uppercase">Motif</label>
-                                        <select 
-                                            className="w-full p-2 border border-blue-200 rounded text-sm bg-white h-[44px]"
-                                            value={formData.appointmentReason}
-                                            onChange={e => updateField("appointmentReason", e.target.value)}
-                                            required={formData.appointmentTaken}
-                                        >
-                                            <option value="VISITE_FERME">Visite Ferme Complète</option>
-                                            <option value="NOUVELLE_CONSULTATION">Nouvelle Consultation</option>
-                                            <option value="LIVRAISON">Livraison</option>
-                                        </select>
-                                    </div>
+                                <div className="space-y-3">
+                                    <input type="datetime-local" className="w-full p-2 border rounded text-sm" value={formData.appointmentDate} onChange={e => updateField("appointmentDate", e.target.value)} />
+                                    <select className="w-full p-2 border rounded text-sm" value={formData.appointmentReason} onChange={e => updateField("appointmentReason", e.target.value)}>
+                                        <option value="VISITE_FERME">Visite Ferme</option>
+                                        <option value="CONSULTATION">Consultation</option>
+                                    </select>
                                 </div>
                             )}
                         </div>
-
-                        {/* Photos */}
-                        <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
-                            <h4 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2">
-                                📸 Photos ({photos.length})
-                            </h4>
+                        <div className="bg-gray-50 p-3 rounded border border-gray-200">
+                            <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Photos</h4>
                             <div className="grid grid-cols-3 gap-2">
-                                {photos.map((p, i) => (
-                                    <div key={i} className="relative aspect-square rounded overflow-hidden">
-                                        <img src={p.content} className="w-full h-full object-cover" alt="preview" />
-                                    </div>
-                                ))}
-                                <label className="flex flex-col items-center justify-center aspect-square border-2 border-dashed border-gray-300 rounded cursor-pointer hover:bg-white transition">
-                                    <span className="text-2xl">📷</span>
-                                    <input 
-                                        type="file" accept="image/*" capture="environment" 
-                                        className="hidden" onChange={handlePhotoAdd} disabled={isCompressing}
-                                    />
-                                </label>
+                                {photos.map((p, i) => <div key={i} className="aspect-square rounded overflow-hidden bg-gray-200"><img src={p.content} className="w-full h-full object-cover" /></div>)}
+                                <label className="flex items-center justify-center aspect-square border-2 border-dashed rounded cursor-pointer">📷<input type="file" accept="image/*" className="hidden" onChange={handlePhotoAdd} /></label>
                             </div>
                         </div>
-
-                        <button 
-                            onClick={handleSubmit} 
-                            disabled={isSubmitting || !isStepValid(4)}
-                            className={`w-full font-black py-4 rounded-xl shadow-lg transition active:scale-95
-                                ${!isStepValid(4) || isSubmitting 
-                                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
-                                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'}
-                            `}
-                        >
-                            {isSubmitting ? 'Enregistrement...' : 'VALIDER LA PROSPECTION'}
-                        </button>
+                        <button onClick={handleSubmit} disabled={isSubmitting || !isStepValid(4)} className="w-full font-black py-4 bg-indigo-600 text-white rounded-xl shadow-lg disabled:bg-gray-300">{isSubmitting ? '...' : 'VALIDER'}</button>
                     </div>
                 )}
             </div>
 
             {/* Navigation Steps */}
             <div className="p-4 border-t bg-gray-50 flex gap-3">
-                {step > 1 && (
-                    <button 
-                        onClick={() => setStep(step - 1)}
-                        className="flex-1 py-3 bg-white border border-gray-200 text-gray-600 font-bold rounded-lg shadow-sm"
-                    >
-                        Retour
-                    </button>
-                )}
-                {step < 4 && (
-                    <button 
-                        onClick={() => setStep(step + 1)}
-                        disabled={!isStepValid(step)}
-                        className={`flex-1 py-3 font-bold rounded-lg shadow-sm text-white transition-colors
-                            ${!isStepValid(step) 
-                                ? 'bg-gray-300 cursor-not-allowed' 
-                                : 'bg-indigo-600 hover:bg-indigo-700'}
-                        `}
-                    >
-                        Suivant
-                    </button>
-                )}
-                <button onClick={()=> router.push('/dashboard/prospections')}
-                    className="flex-1 py-3 bg-gray-50 border border-gray-100 text-gray-800 font-bold rounded-lg shadow-sm">Fermer</button>
+                {step > 1 && <button onClick={() => setStep(step - 1)} className="flex-1 py-3 bg-white border font-bold text-gray-600 rounded-lg">&larr;</button>}
+                {step < 4 && <button onClick={() => setStep(step + 1)} disabled={!isStepValid(step)} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-lg disabled:bg-gray-300">Suivant</button>}
+                <button onClick={()=> router.push('/dashboard/prospections')} className="flex-1 py-3 bg-gray-50 border font-bold text-gray-800 rounded-lg" title="Fermer">X</button>
             </div>
+            <style>{`
+                select.hidden{ display: none;}
+                `}
+            </style>
         </div>
+        
     );
 }

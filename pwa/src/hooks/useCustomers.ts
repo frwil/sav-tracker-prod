@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 // Nettoyage URL pour éviter les doubles slashs
 const cleanUrl = (url: string | undefined) => {
@@ -20,74 +20,73 @@ export function useCustomers() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
-        let isMounted = true;
+    // 1. Définition de la fonction de chargement (Stable avec useCallback)
+    const fetchCustomers = useCallback(async () => {
+        const token = localStorage.getItem('sav_token');
+        setLoading(true);
+        setError(null);
 
-        const loadCustomers = async () => {
-            const token = localStorage.getItem('sav_token');
-            
-            // 1. CHARGEMENT CACHE (Immédiat)
-            const cachedData = localStorage.getItem('sav_customers_cache');
-            if (cachedData) {
-                try {
-                    const parsed = JSON.parse(cachedData);
-                    if (isMounted) setOptions(parsed);
-                } catch (e) {
-                    console.error("Erreur cache", e);
-                }
-            }
-
-            if (!navigator.onLine) {
-                if (isMounted) setLoading(false);
-                return;
-            }
-
-            // 2. APPEL API
+        // A. Chargement Cache (Optimiste)
+        const cachedData = localStorage.getItem('sav_customers_cache');
+        if (cachedData) {
             try {
-                // On tente de charger sans pagination pour avoir toute la liste
-                const url = `${API_BASE}/customers?pagination=false`;
-                
-                const res = await fetch(url, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Accept': 'application/ld+json'
-                    }
-                });
-
-                if (res.ok) {
-                    const data = await res.json();
-                    
-                    // ⚠️ CORRECTION ICI : On cherche 'hydra:member' OU 'member'
-                    const rawMembers = data['hydra:member'] || data['member'] || [];
-
-                    //console.log(`✅ ${rawMembers.length} clients chargés.`);
-
-                    const formattedOptions: CustomerOption[] = rawMembers.map((c: any) => ({
-                        // Utilise @id ou construit l'IRI manuellement si absent
-                        value: c['@id'] || `/api/customers/${c.id}`, 
-                        label: c.zone ? `${c.name} (${c.zone})` : c.name
-                    }));
-
-                    if (isMounted) {
-                        setOptions(formattedOptions);
-                        localStorage.setItem('sav_customers_cache', JSON.stringify(formattedOptions));
-                    }
-                } else {
-                    console.error("Erreur API Customers:", res.status);
-                    if (!cachedData && isMounted) setError("Impossible de charger les clients.");
-                }
-            } catch (err: any) {
-                console.error("Erreur Fetch Customers:", err);
-                if (!cachedData && isMounted) setError("Erreur de connexion.");
-            } finally {
-                if (isMounted) setLoading(false);
+                const parsed = JSON.parse(cachedData);
+                setOptions(parsed);
+            } catch (e) {
+                console.error("Erreur cache", e);
             }
-        };
+        }
 
-        loadCustomers();
+        if (!navigator.onLine) {
+            setLoading(false);
+            return;
+        }
 
-        return () => { isMounted = false; };
+        // B. Appel API
+        try {
+            const url = `${API_BASE}/customers?pagination=false`;
+            
+            const res = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/ld+json'
+                }
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                
+                // Gestion compatible Hydra (API Platform) ou tableau simple
+                const rawMembers = data['hydra:member'] || data['member'] || [];
+
+                const formattedOptions: CustomerOption[] = rawMembers.map((c: any) => ({
+                    value: c['@id'] || `/api/customers/${c.id}`, 
+                    label: c.zone ? `${c.name} (${c.zone})` : c.name
+                }));
+                
+                // Tri alphabétique pour plus de confort
+                formattedOptions.sort((a, b) => a.label.localeCompare(b.label));
+
+                setOptions(formattedOptions);
+                localStorage.setItem('sav_customers_cache', JSON.stringify(formattedOptions));
+            } else {
+                console.error("Erreur API Customers:", res.status);
+                // Si pas de cache, on affiche l'erreur
+                if (!cachedData) setError("Impossible de charger les clients.");
+            }
+        } catch (err: any) {
+            console.error("Erreur Fetch Customers:", err);
+            if (!cachedData) setError("Erreur de connexion.");
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    return { options, loading, error };
+    // 2. Chargement initial
+    useEffect(() => {
+        fetchCustomers();
+    }, [fetchCustomers]);
+
+    // 3. On retourne 'refetch' pour permettre le rechargement manuel
+    return { options, loading, error, refetch: fetchCustomers };
 }
