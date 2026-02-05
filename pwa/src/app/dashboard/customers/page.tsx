@@ -196,7 +196,7 @@ export default function CustomersPage() {
         setIsSubmitting(true);
         const payload = { ...formData, activated: true };
         const url = editingCustomer ? `/customers/${editingCustomer.id}` : '/customers';
-        const method = editingCustomer ? 'PUT' : 'POST';
+        const method = editingCustomer ? 'PATCH' : 'POST';
 
         if (!navigator.onLine) {
             addToQueue({ url, method: method as any, body: payload });
@@ -209,7 +209,7 @@ export default function CustomersPage() {
             const token = localStorage.getItem('sav_token');
             const res = await fetch(`${API_URL}${url}`, {
                 method,
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                headers: { 'Content-Type': editingCustomer ? 'application/merge-patch+json' : 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify(payload)
             });
 
