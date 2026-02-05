@@ -3,17 +3,18 @@
 import { useState, useEffect } from 'react';
 import Select from 'react-select';
 import { useSync } from '@/providers/SyncProvider';
-import { useCustomers, CustomerOption } from '@/hooks/useCustomers';
+import { useCustomers } from '@/hooks/useCustomers';
 import { API_URL } from '../shared';
 import toast from "react-hot-toast";
 
-// --- FORMULAIRE BÂTIMENT (Structure unifiée avec buildings/page.tsx) ---
+// --- FORMULAIRE BÂTIMENT ---
 export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onCancel }: any) => {
     const { addToQueue } = useSync();
-    const { options: customerOptions, loading: customersLoading } = useCustomers();
+    // On garde le hook pour d'autres usages potentiels, mais on ne s'en sert plus pour bloquer le formulaire
+    const { options: customerOptions } = useCustomers(); 
     const [loading, setLoading] = useState(false);
 
-    // État identique à la page principale de gestion des bâtiments
+    // Initialisation immédiate avec le customerIri fourni par la page parente
     const [formData, setFormData] = useState<{
         name: string;
         surface: string;
@@ -23,22 +24,26 @@ export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onC
         name: `Bâtiment ${(existingBuildings?.length || 0) + 1}`,
         surface: '',
         maxCapacity: '',
-        customer: ''
+        customer: customerIri || '' // ✅ Assignation directe
     });
 
-    // Pré-remplissage automatique du client (contexte de la visite)
+    // Sécurité : Mise à jour si l'IRI change après le montage
     useEffect(() => {
-        if (customerIri && customerOptions.length > 0 && !formData.customer) {
-            const found = customerOptions.find(c => c.value === customerIri);
-            if (found) setFormData(prev => ({ ...prev, customer: found.value }));
+        if (customerIri) {
+            setFormData(prev => ({ ...prev, customer: customerIri }));
         }
-    }, [customerIri, customerOptions]);
+    }, [customerIri]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        if (!formData.name || !formData.surface || !formData.customer) {
-            toast.error("Merci de remplir le nom, la surface et le client.");
+        // Validation
+        if (!formData.customer) {
+            toast.error("Erreur technique : Client non identifié.");
+            return;
+        }
+        if (!formData.name || !formData.surface) {
+            toast.error("Merci de remplir le nom et la surface.");
             return;
         }
 
@@ -52,16 +57,12 @@ export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onC
             activated: true 
         };
 
-        // 1. Détection Offline Navigateur -> Sauvegarde Auto
+        // 1. Détection Offline -> Sauvegarde Auto
         if (!navigator.onLine) {
             addToQueue({ url, method: 'POST', body });
-            toast("🌐 Hors ligne : Bâtiment sauvegardé et en attente de synchro.",{
+            toast("🌐 Hors ligne : Bâtiment sauvegardé.", {
                 icon: "🌐",
-                style: {
-                    borderRadius: "10px",
-                    background: "#3b82f6", // Bleu pour info
-                    color: "#fff",
-                },
+                style: { background: "#3b82f6", color: "#fff" },
                 duration: 4000,
             });
             onSuccess();
@@ -69,8 +70,8 @@ export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onC
         }
 
         // 2. Mode Online
-        const token = localStorage.getItem('sav_token');
         try {
+            const token = localStorage.getItem('sav_token');
             const res = await fetch(`${API_URL}${url}`, { 
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
@@ -79,30 +80,19 @@ export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onC
 
             if (!res.ok) {
                 const errData = await res.json().catch(() => ({}));
-                const e: any = new Error(errData['hydra:description'] || 'Erreur API');
-                e.status = res.status;
-                throw e;
+                throw new Error(errData['hydra:description'] || 'Erreur API');
             }
             onSuccess();
 
         } catch (e: any) {
-            // ✅ Gestion stricte des erreurs
-            if (e.status) {
-                // CAS A : Erreur API (400, 422, 500...) -> ON REJETTE (Pas de sauvegarde)
-                toast.error(`⛔ Impossible de créer le bâtiment (${e.status}): ${e.message}`);
-            } else {
-                // CAS B : Erreur Réseau (Fetch failed) -> SAUVEGARDE AUTO
+            // Fallback offline si erreur réseau
+            const isNetworkError = e.message && (e.message.includes('fetch') || e.message.includes('Network'));
+            if (isNetworkError) {
                 addToQueue({ url, method: 'POST', body });
-                toast("⚠️ Connexion instable. Bâtiment sauvegardé en mode hors-ligne.",{
-                    icon: "⚠️",
-                    style: {
-                        borderRadius: "10px",
-                        background: "#f59e0b", // Orange pour avertissement
-                        color: "#fff",
-                    },
-                    duration: 4000,
-                });
+                toast("⚠️ Connexion instable. Sauvegardé hors-ligne.", { icon: "⚠️" });
                 onSuccess();
+            } else {
+                toast.error(`⛔ Erreur: ${e.message}`);
             }
         } finally { 
             setLoading(false); 
@@ -114,37 +104,31 @@ export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onC
             <h4 className="font-bold text-blue-900 mb-3 flex items-center gap-2">🏗️ Nouveau Bâtiment</h4>
             
             <div className="space-y-3">
-                {/* Sélection Client */}
-                <div style={{display:'none'}}>
-                    <input
-                        type='hidden'
-                        value={formData.customer || ''}
-                        onChange={(e) => setFormData({ ...formData, customer: e.target.value })}
-                        className="text-sm"
-                    />
-                </div>
+                {/* ✅ Champ caché pour le client : plus besoin de le sélectionner manuellement */}
+                <input type="hidden" value={formData.customer} />
 
                 {/* Nom */}
                 <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nom *</label>
                     <input 
                         className="w-full border p-2 rounded text-sm focus:ring-2 focus:ring-blue-200 outline-none" 
                         placeholder="Ex: Bâtiment A" 
                         value={formData.name} 
                         onChange={e => setFormData({...formData, name: e.target.value})} 
-                        readOnly
-                        type='hidden'
+                        readOnly={!!formData.name} // Le nom est généré automatiquement et devient en lecture seule pour éviter les doublons
                     />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                     {/* Surface */}
                     <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Surface (m²)</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Surface (m²) *</label>
                         <input 
                             type="number" step="0.1" 
                             className="w-full border p-2 rounded text-sm" 
-                            placeholder="0.0" 
-                            value={formData.surface || '1'} 
+                            placeholder="Ex: 500" 
+                            required 
+                            value={formData.surface} 
                             onChange={e => setFormData({...formData, surface: e.target.value})} 
                             min={1}
                         />
@@ -156,7 +140,7 @@ export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onC
                             type="number" 
                             className="w-full border p-2 rounded text-sm" 
                             placeholder="Sujets" 
-                            value={formData.maxCapacity || '1'} 
+                            value={formData.maxCapacity} 
                             onChange={e => setFormData({...formData, maxCapacity: e.target.value})} 
                             min={1}
                         />
@@ -178,8 +162,8 @@ export const NewBuildingForm = ({ customerIri, existingBuildings, onSuccess, onC
 export const NewFlockForm = ({ 
     buildingIri, 
     customerIri, 
-    speculations = [], // ✅ 1. Sécurité : tableau vide par défaut
-    standards = [],    // ✅ 1. Sécurité : tableau vide par défaut
+    speculations = [], 
+    standards = [],    
     onSuccess, 
     onCancel 
 }: any) => {
@@ -214,16 +198,11 @@ export const NewFlockForm = ({
             activated: true
         };
 
-        // 1. Offline Check -> Auto Save
         if (!navigator.onLine) {
             addToQueue({ url, method: 'POST', body });
-            toast("🌐 Hors ligne : Bande sauvegardée et en attente de synchro.",{
+            toast("🌐 Hors ligne : Bande sauvegardée.", {
                 icon: "🌐",
-                style: {
-                    borderRadius: "10px",
-                    background: "#3b82f6", // Bleu pour info
-                    color: "#fff",
-                },
+                style: { background: "#3b82f6", color: "#fff" },
                 duration: 4000,
             });
             onSuccess();
@@ -240,48 +219,30 @@ export const NewFlockForm = ({
             
             if (!res.ok) {
                 const errData = await res.json().catch(() => ({}));
-                const e: any = new Error(errData['hydra:description'] || 'Erreur API');
-                e.status = res.status;
-                throw e;
+                throw new Error(errData['hydra:description'] || 'Erreur API');
             }
             onSuccess();
 
         } catch (e: any) {
-            // ✅ 2. Gestion stricte des erreurs
-            if (e.status) {
-                // Erreur serveur/validation -> Rejet (Pas de sauvegarde)
-                toast.error(`⛔ Erreur lors de la création (${e.status}): ${e.message}`);
-            } else {
-                // Erreur Connexion -> Sauvegarde Auto
+            if (e.message && (e.message.includes('fetch') || e.message.includes('Network'))) {
                 addToQueue({ url, method: 'POST', body });
-                toast("⚠️ Connexion perdue. Bande sauvegardée localement.",{
-                    icon: "⚠️",
-                    style: {
-                        borderRadius: "10px",
-                        background: "#f59e0b", // Orange pour avertissement
-                        color: "#fff",
-                    },
-                    duration: 4000,
-                });
+                toast("⚠️ Connexion perdue. Bande sauvegardée.", { icon: "⚠️" });
                 onSuccess();
+            } else {
+                toast.error(`⛔ Erreur: ${e.message}`);
             }
         } finally { 
             setLoading(false); 
         }
     };
 
-    // ✅ 3. Filtrage sécurisé (Array check + String compare)
     const safeStandards = Array.isArray(standards) ? standards : [];
     
     const filteredStandards = safeStandards.filter((s: any) => {
         if (!formData.speculation) return false;
-
-        // Extraction robuste de l'ID/IRI
         const standardSpecRef = typeof s.speculation === 'object' && s.speculation !== null
             ? (s.speculation['@id'] || s.speculation.id) 
             : s.speculation;
-
-        // Comparaison stricte
         return String(standardSpecRef) === String(formData.speculation);
     });
 
@@ -290,19 +251,14 @@ export const NewFlockForm = ({
             <h4 className="font-bold text-indigo-900 mb-3 flex items-center gap-2">🐣 Nouvelle Bande</h4>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {/* Nom */}
                 <div style={{display:'none'}}>
                     <input 
                         type='hidden'
-                        className="w-full border p-2 rounded text-sm focus:ring-2 focus:ring-indigo-200 outline-none" 
-                        placeholder="Ex: Lot Janvier" 
                         value={formData.name} 
-                        // ✅ 4. State update sécurisé
                         onChange={e => setFormData(prev => ({...prev, name: e.target.value}))} 
                     />
                 </div>
 
-                {/* Effectif */}
                 <div>
                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Effectif départ</label>
                     <input 
@@ -315,7 +271,6 @@ export const NewFlockForm = ({
                     />
                 </div>
 
-                {/* Date */}
                 <div>
                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Date mise en place</label>
                     <input 
@@ -326,7 +281,6 @@ export const NewFlockForm = ({
                     />
                 </div>
 
-                {/* Spéculation */}
                 <div>
                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Spéculation</label>
                     <select 
@@ -335,18 +289,16 @@ export const NewFlockForm = ({
                         onChange={e => setFormData(prev => ({
                             ...prev, 
                             speculation: e.target.value, 
-                            standard: '' // Reset standard
+                            standard: '' 
                         }))}
                     >
                         <option value="">-- Choisir --</option>
-                        {/* ✅ 5. Protection contre .map() sur undefined */}
                         {Array.isArray(speculations) && speculations.map((s:any) => (
                             <option key={s['@id']} value={s['@id']}>{s.name}</option>
                         ))}
                     </select>
                 </div>
                 
-                {/* Standard (Conditionnel) */}
                 {formData.speculation && filteredStandards.length > 0 && (
                     <div className="md:col-span-2">
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Souche / Standard (Optionnel)</label>
