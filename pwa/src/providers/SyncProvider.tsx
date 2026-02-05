@@ -1,4 +1,3 @@
-// pwa/src/providers/SyncProvider.tsx
 "use client";
 
 import React, {
@@ -8,9 +7,10 @@ import React, {
     useState,
     useCallback,
 } from "react";
-import { syncQueueStorage } from "../services/storage"; // ✅ Import IndexedDB
-import { SyncTask } from "@/types/SyncTask"; // ✅ Utilisation de votre type existant
+import { syncQueueStorage } from "../services/storage";
+import { SyncTask } from "@/types/SyncTask";
 import toast from "react-hot-toast";
+import { useQueryClient } from "@tanstack/react-query"; // ✅ Import nécessaire pour vider le cache
 
 interface SyncContextType {
     queue: SyncTask[];
@@ -18,12 +18,16 @@ interface SyncContextType {
         task: Omit<SyncTask, "id" | "timestamp" | "retryCount">,
     ) => void;
     isSyncing: boolean;
+    isOnline: boolean; // ✅ État exposé
+    refreshAllData: () => Promise<void>; // ✅ Fonction exposée
 }
 
 const SyncContext = createContext<SyncContextType>({
     queue: [],
     addToQueue: () => {},
     isSyncing: false,
+    isOnline: true,
+    refreshAllData: async () => {},
 });
 
 export const useSync = () => useContext(SyncContext);
@@ -35,11 +39,17 @@ export default function SyncProvider({
 }) {
     const [queue, setQueue] = useState<SyncTask[]>([]);
     const [isSyncing, setIsSyncing] = useState(false);
-    const [isLoaded, setIsLoaded] = useState(false); // État pour attendre le chargement de la DB
+    const [isLoaded, setIsLoaded] = useState(false);
+    const [isOnline, setIsOnline] = useState(true); // ✅ État local
+    
+    const queryClient = useQueryClient(); // ✅ Accès au client React Query
     const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
     // 1. CHARGEMENT INITIAL (Asynchrone via IndexedDB)
     useEffect(() => {
+        // Initialisation de l'état de connexion au montage
+        setIsOnline(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
         const loadQueue = async () => {
             try {
                 const savedQueue =
@@ -59,9 +69,8 @@ export default function SyncProvider({
         loadQueue();
     }, []);
 
-    // 2. PERSISTANCE AUTOMATIQUE (Asynchrone)
+    // 2. PERSISTANCE AUTOMATIQUE
     useEffect(() => {
-        // On n'écrit que si le chargement initial est terminé pour ne pas écraser la DB
         if (isLoaded) {
             syncQueueStorage
                 .setItem("queue", queue)
@@ -70,14 +79,61 @@ export default function SyncProvider({
     }, [queue, isLoaded]);
 
     /**
-     * 🔴 LOG DE L'ERREUR FATALE (AuditLog)
-     * Envoie un rapport au serveur si une requête est rejetée (400, 500)
+     * 🟢 RAFRAÎCHISSEMENT GLOBAL DES DONNÉES
+     * Recharge le cache Clients (localStorage) + Invalide React Query
      */
-    const logSyncError = async (
-        item: SyncTask,
-        errorMsg: string,
-        token: string,
-    ) => {
+    const refreshAllData = useCallback(async () => {
+        if (!navigator.onLine) {
+            toast("Pas de connexion internet pour mettre à jour.", { icon: "📴" });
+            return;
+        }
+
+        const toastId = toast.loading("Mise à jour des données...");
+
+        try {
+            const token = localStorage.getItem("sav_token");
+            if (!token) return;
+
+            // A. Rechargement manuel des Clients pour le cache LocalStorage
+            // (Nécessaire car useCustomers lit ce cache au démarrage)
+            const resCustomers = await fetch(`${API_URL}/customers?pagination=false`, {
+                headers: { 
+                    Authorization: `Bearer ${token}`, 
+                    Accept: "application/ld+json" 
+                }
+            });
+            
+            if (resCustomers.ok) {
+                const data = await resCustomers.json();
+                const rawMembers = data['hydra:member'] || data['member'] || [];
+                
+                // Transformation au format attendu par useCustomers
+                const formattedOptions = rawMembers.map((c: any) => ({
+                    value: c['@id'] || `/api/customers/${c.id}`, 
+                    label: c.zone ? `${c.name} (${c.zone})` : c.name
+                }));
+                
+                // Mise à jour du cache
+                localStorage.setItem('sav_customers_cache', JSON.stringify(formattedOptions));
+            }
+
+            // B. Invalidation du cache React Query
+            // Cela force toutes les listes (Prospections, Visites, Bâtiments...) à se recharger
+            await queryClient.invalidateQueries();
+
+            toast.success("Données à jour !", { id: toastId });
+            console.log("🔄 Données rafraîchies depuis le serveur");
+
+        } catch (e) {
+            console.error("Erreur refreshAllData", e);
+            toast.error("Erreur lors de la mise à jour", { id: toastId });
+        }
+    }, [API_URL, queryClient]);
+
+    /**
+     * 🔴 LOG ERREUR SYNC
+     */
+    const logSyncError = async (item: SyncTask, errorMsg: string, token: string) => {
         try {
             await fetch(`${API_URL}/audit_logs`, {
                 method: "POST",
@@ -92,29 +148,17 @@ export default function SyncProvider({
                     requestPayload: item.body,
                 }),
             });
-            toast(
-                `📝 Incident enregistré dans AuditLog pour l'item ${item.id}`,
-                {
-                    icon: "📡",
-                    style: {
-                        borderRadius: "10px",
-                        background: "#F59E0B", // Orange pour signaler l'attente
-                        color: "#fff",
-                    },
-                    duration: 5000,
-                },
-            );
-            console.warn(
-                `📝 Incident enregistré dans AuditLog pour l'item ${item.id}`,
-            );
+            toast(`Note : Erreur enregistrée pour l'élément ${item.id.slice(0,4)}...`, {
+                icon: "📝",
+                duration: 4000,
+            });
         } catch (e) {
-            toast.error(`❌ Impossible d'envoyer le log d'erreur pour l'item ${item.id}`);
             console.error("Impossible d'envoyer le log d'erreur", e);
         }
     };
 
     /**
-     * ⚡ MOTEUR DE SYNCHRONISATION
+     * ⚡ MOTEUR DE SYNCHRONISATION (CORRIGÉ)
      */
     const processQueue = useCallback(async () => {
         if (queue.length === 0 || isSyncing || !navigator.onLine) return;
@@ -123,8 +167,6 @@ export default function SyncProvider({
         const token = localStorage.getItem("sav_token");
 
         if (!token) {
-            toast.error("❌ Impossible de synchroniser : pas de token d'authentification.");
-            console.warn("Sync annulée : Pas de token.");
             setIsSyncing(false);
             return;
         }
@@ -133,14 +175,13 @@ export default function SyncProvider({
         const currentQueue = [...queue];
 
         for (const item of currentQueue) {
+            let shouldRemove = false; // Flag pour sécuriser la suppression
+
             try {
                 const res = await fetch(`${API_URL}${item.url}`, {
                     method: item.method,
                     headers: {
-                        "Content-Type":
-                            item.method === "PATCH"
-                                ? "application/merge-patch+json"
-                                : "application/json",
+                        "Content-Type": item.method === "PATCH" ? "application/merge-patch+json" : "application/json",
                         Authorization: `Bearer ${token}`,
                     },
                     body: JSON.stringify(item.body),
@@ -149,89 +190,97 @@ export default function SyncProvider({
                 // CAS A : SUCCÈS
                 if (res.ok) {
                     console.log(`✅ Synchro réussie : ${item.url}`);
-                    processedIds.push(item.id);
-                }
-                // CAS B : ERREUR FATALE API (400, 500...)
+                    shouldRemove = true;
+                } 
+                // CAS B : ERREUR API (400, 422, 500...)
                 else {
                     const errorJson = await res.json().catch(() => ({}));
-                    const errorMsg =
-                        errorJson["hydra:description"] ||
-                        errorJson.detail ||
-                        `Erreur HTTP ${res.status}`;
-                        toast.error(`❌ Erreur synchronisation ${item.url} : ${errorMsg}`);
-                    console.error(
-                        `❌ Erreur Fatale API (${res.status}) sur ${item.url}.`,
-                    );
+                    const errorMsg = errorJson["hydra:description"] || errorJson.detail || `Erreur ${res.status}`;
+                    
+                    toast.error(`❌ Erreur sync sur ${item.url} (Abandon)`);
+                    console.error(`❌ Erreur API (${res.status}) sur ${item.url} - Élément retiré de la file.`);
 
-                    await logSyncError(
-                        item,
-                        `Status ${res.status}: ${errorMsg}`,
-                        token,
-                    );
-                    processedIds.push(item.id); // On supprime pour ne pas bloquer la file
+                    // On marque IMMÉDIATEMENT l'élément à supprimer pour éviter la boucle
+                    shouldRemove = true; 
+
+                    // On tente de logger, mais sans attendre (fire and forget) pour ne pas bloquer
+                    logSyncError(item, `Status ${res.status}: ${errorMsg}`, token).catch(console.error);
                 }
             } catch (error) {
-                // CAS C : ERREUR RÉSEAU
-                toast.error(`🌐 Erreur Réseau sur ${item.url}. Synchronisation en pause.`);
-                console.warn(
-                    `🌐 Erreur Réseau sur ${item.url}. Pause de la synchronisation.`,
-                );
-                break; // ON ARRÊTE TOUT et on attend le retour du réseau
+                // CAS C : ERREUR RÉSEAU RÉELLE (Le serveur n'a pas répondu du tout)
+                // Ici, on ne met PAS shouldRemove = true, car on veut réessayez plus tard.
+                toast.error(`🌐 Réseau instable sur ${item.url}. Pause.`);
+                console.warn(`🌐 Erreur Réseau. Pause.`);
+                break; // On arrête la boucle pour l'instant
+            } finally {
+                // Si l'élément a été traité (succès ou erreur fatale API), on l'ajoute à la liste de suppression
+                if (shouldRemove) {
+                    processedIds.push(item.id);
+                }
             }
         }
 
-        // Mise à jour de la file (suppression des éléments traités)
+        // Nettoyage de la file
         if (processedIds.length > 0) {
-            setQueue((prevQueue) =>
-                prevQueue.filter((task) => !processedIds.includes(task.id)),
-            );
+            setQueue((prev) => prev.filter((task) => !processedIds.includes(task.id)));
+            
+            // Si on a traité tout le paquet avec succès (ou échec fatal), on tente un refresh
+            // On vérifie que la boucle n'a pas été interrompue par un break (réseau)
+            const allProcessed = currentQueue.every(task => processedIds.includes(task.id));
+            if (allProcessed && processedIds.length > 0) {
+                 setTimeout(() => refreshAllData(), 1000); 
+            }
         }
 
         setIsSyncing(false);
-    }, [queue, isSyncing, API_URL]);
+    }, [queue, isSyncing, API_URL, refreshAllData]);
 
-    // 4. DÉCLENCHEURS
+    // 4. GESTION ÉVÉNEMENTS RÉSEAU
     useEffect(() => {
         const handleOnline = () => {
+            setIsOnline(true);
             toast.success("🟢 Connexion rétablie !");
-            console.log("🟢 Connexion rétablie !");
+            
+            // 1. Envoyer les données en attente
             processQueue();
+            
+            // 2. Mettre à jour les données affichées (Pull)
+            refreshAllData();
+        };
+
+        const handleOffline = () => {
+            setIsOnline(false);
+            toast("📴 Mode hors ligne activé");
         };
 
         window.addEventListener("online", handleOnline);
+        window.addEventListener("offline", handleOffline);
 
-        // Tenter une sync au montage si on est déjà en ligne et que la DB est chargée
+        // Tentative au démarrage
         if (navigator.onLine && queue.length > 0 && isLoaded) {
             processQueue();
         }
 
-        return () => window.removeEventListener("online", handleOnline);
-    }, [processQueue, queue.length, isLoaded]);
+        return () => {
+            window.removeEventListener("online", handleOnline);
+            window.removeEventListener("offline", handleOffline);
+        };
+    }, [processQueue, refreshAllData, queue.length, isLoaded]);
 
-    // 5. FONCTION D'AJOUT
-    const addToQueue = (
-        taskData: Omit<SyncTask, "id" | "timestamp" | "retryCount">,
-    ) => {
+    const addToQueue = (taskData: Omit<SyncTask, "id" | "timestamp" | "retryCount">) => {
         const newTask: SyncTask = {
             ...taskData,
-            id: crypto.randomUUID
-                ? crypto.randomUUID()
-                : `task-${Date.now()}-${Math.random()}`,
+            id: crypto.randomUUID ? crypto.randomUUID() : `task-${Date.now()}-${Math.random()}`,
             timestamp: Date.now(),
             retryCount: 0,
         };
 
         setQueue((prev) => [...prev, newTask]);
-        toast("💾 Action sauvegardée localement pour synchronisation.", {
+        toast("💾 Action sauvegardée localement.", {
             icon: "💾",
-            style: {
-                borderRadius: "10px",
-                background: "#e4c61c", // Vert pour succès
-                color: "#000",
-            },
+            style: { background: "#e4c61c", color: "#000" },
             duration: 3000,
         });
-        console.log("💾 Action sauvegardée localement (IndexedDB)");
 
         if (navigator.onLine) {
             setTimeout(() => processQueue(), 500);
@@ -239,28 +288,16 @@ export default function SyncProvider({
     };
 
     return (
-        <SyncContext.Provider value={{ queue, addToQueue, isSyncing }}>
+        <SyncContext.Provider value={{ queue, addToQueue, isSyncing, isOnline, refreshAllData }}>
             {children}
 
-            {/* INDICATEUR VISUEL DISCRET */}
+            {/* INDICATEUR VISUEL */}
             {queue.length > 0 && (
                 <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2 animate-in fade-in slide-in-from-bottom-4">
-                    <div
-                        className={`px-4 py-2 rounded-full shadow-lg font-bold text-xs flex items-center gap-2 transition-colors ${
-                            isSyncing
-                                ? "bg-blue-600 text-white"
-                                : navigator.onLine
-                                  ? "bg-yellow-400 text-yellow-900"
-                                  : "bg-gray-800 text-white"
-                        }`}
-                    >
-                        {isSyncing ? (
-                            <>🔄 Synchronisation...</>
-                        ) : navigator.onLine ? (
-                            <>⏳ En attente ({queue.length})</>
-                        ) : (
-                            <>🌐 Hors ligne ({queue.length})</>
-                        )}
+                    <div className={`px-4 py-2 rounded-full shadow-lg font-bold text-xs flex items-center gap-2 transition-colors ${
+                        isSyncing ? "bg-blue-600 text-white" : navigator.onLine ? "bg-yellow-400 text-yellow-900" : "bg-gray-800 text-white"
+                    }`}>
+                        {isSyncing ? <>🔄 Synchronisation...</> : navigator.onLine ? <>⏳ En attente ({queue.length})</> : <>🌐 Hors ligne ({queue.length})</>}
                     </div>
                 </div>
             )}

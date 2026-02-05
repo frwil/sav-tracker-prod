@@ -778,7 +778,7 @@ export default function DashboardHome() {
                             <MenuCard
                                 title="Config"
                                 icon="⚙️"
-                                href="/dashboard/configuration"
+                                href="/dashboard/settings"
                                 color="gray"
                                 description="Paramètres globaux."
                             />
