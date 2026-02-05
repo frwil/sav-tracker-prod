@@ -310,7 +310,7 @@ export default function NewVisitPage() {
             {isClientModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 relative flex flex-col max-h-[90vh]">
-                        <button onClick={() => setIsClientModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold">✕</button>
+                        <button onClick={() => {setIsClientModalOpen(false); handleGeolocateClient();}} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold">✕</button>
                         
                         <h3 className="text-xl font-bold mb-4 text-gray-800">Nouveau Client</h3>
                         
