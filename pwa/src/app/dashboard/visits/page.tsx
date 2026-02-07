@@ -5,27 +5,25 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Select from 'react-select';
 import { useCustomers, CustomerOption } from '@/hooks/useCustomers';
-import { useSync } from "@/providers/SyncProvider"; // ✅ Import Sync
+import { useSync } from "@/providers/SyncProvider";
 
 interface Visit {
-    id: number | string; // string pour les IDs temporaires
+    id: number | string;
     visitedAt: string;
     technician: { fullname: string };
     customer: { name: string; zone: string };
     gpsCoordinates?: string;
     closed: boolean;
     activated: boolean;
-    __isPending?: boolean; // Flag interne pour l'UI
+    __isPending?: boolean;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
-// Helper pour obtenir le début et la fin de journée/semaine/mois
 const getDateRange = (type: string, dateRef: string, dateEndRef?: string) => {
     const start = new Date(dateRef);
     const end = new Date(dateEndRef || dateRef);
     
-    // Reset heures
     start.setHours(0, 0, 0, 0);
     end.setHours(23, 59, 59, 999);
 
@@ -50,12 +48,11 @@ const getDateRange = (type: string, dateRef: string, dateEndRef?: string) => {
 export default function VisitsListPage() {
     const router = useRouter();
     const { options: customerOptions, loading: customersLoading } = useCustomers();
-    const { queue } = useSync(); // ✅ Récupération de la file d'attente
+    const { queue } = useSync();
 
     const [visits, setVisits] = useState<Visit[]>([]);
     const [loading, setLoading] = useState(true);
 
-    // --- ÉTATS DES FILTRES ---
     const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
     const [filterType, setFilterType] = useState('today'); 
     const [datePrimary, setDatePrimary] = useState(new Date().toISOString().slice(0, 10));
@@ -67,7 +64,6 @@ export default function VisitsListPage() {
             const token = localStorage.getItem('sav_token');
             if (!token) { router.push('/'); return; }
 
-            // Si hors ligne et pas de cache, on évite l'appel inutile
             if (!navigator.onLine) {
                 setLoading(false);
                 return;
@@ -105,7 +101,6 @@ export default function VisitsListPage() {
                 }
 
                 const data = await res.json();
-                // Le tri sera fait globalement après fusion
                 setVisits(data);
             } catch (err) {
                 console.error(err);
@@ -117,17 +112,14 @@ export default function VisitsListPage() {
         fetchVisits();
     }, [router, selectedCustomer, filterType, datePrimary, dateSecondary]);
 
-    // --- FUSION OPTIMISTE (API + QUEUE) ---
     const displayedVisits = useMemo(() => {
-        // 1. Transformer les éléments de la queue en objets "Visite"
         const pendingVisits: Visit[] = queue
             .filter((item: any) => item.url === '/visits' && item.method === 'POST')
             .map((item: any) => {
-                // Essayer de retrouver le nom du client via les options chargées
                 const customerOpt = customerOptions.find(opt => opt.value === item.body.customer);
                 
                 return {
-                    id: `TEMP_${Date.now()}_${Math.random()}`, // ID Temporaire
+                    id: `TEMP_${Date.now()}_${Math.random()}`,
                     visitedAt: item.body.visitedAt,
                     technician: { fullname: "Moi (En attente)" }, 
                     customer: { 
@@ -136,19 +128,17 @@ export default function VisitsListPage() {
                     },
                     closed: false,
                     activated: true,
-                    __isPending: true // Flag important
+                    __isPending: true
                 };
             });
 
-        // 2. Appliquer les filtres LOCAUX aux visites en attente
+        const validVisits = visits.filter((visit: Visit) => visit && visit.customer);
+
         const filteredPending = pendingVisits.filter(v => {
-            // Filtre Client
             if (selectedCustomer) {
-                // On compare le nom car on n'a pas forcément l'IRI propre dans l'objet reconstruit
                 if (v.customer.name !== selectedCustomer.label) return false;
             }
 
-            // Filtre Date
             if (filterType !== 'all') {
                 const d = new Date(v.visitedAt);
                 let range = { after: new Date(0), before: new Date(9999, 11, 31) };
@@ -160,7 +150,6 @@ export default function VisitsListPage() {
                     const r = getDateRange('day', datePrimary);
                     range = { after: new Date(r.after), before: new Date(r.before) };
                 } 
-                // ... (On peut étendre aux autres types si besoin, ici simplifié)
                 
                 if (filterType === 'today' || filterType === 'date') {
                     return d >= range.after && d <= range.before;
@@ -169,23 +158,22 @@ export default function VisitsListPage() {
             return true;
         });
 
-        // 3. Fusionner et Trier
-        const all = [...filteredPending, ...visits];
+        const all = [...filteredPending, ...validVisits];
         
         return all.sort((a, b) => {
-            // Priorité 1 : Pending (Toujours en haut)
+            if (!a?.customer && !b?.customer) return 0;
+            if (!a?.customer) return 1;
+            if (!b?.customer) return -1;
+
             if (a.__isPending && !b.__isPending) return -1;
             if (!a.__isPending && b.__isPending) return 1;
 
-            // Priorité 2 : Non-clôturées
             if (a.closed !== b.closed) return a.closed ? 1 : -1; 
             
-            // Priorité 3 : Date décroissante
             return new Date(b.visitedAt).getTime() - new Date(a.visitedAt).getTime();
         });
 
     }, [visits, queue, customerOptions, selectedCustomer, filterType, datePrimary]);
-
 
     const getFilterLabel = () => {
         if (filterType === 'today') return "Aujourd'hui";
@@ -210,7 +198,6 @@ export default function VisitsListPage() {
 
             <div className="max-w-5xl mx-auto px-4">
                 
-                {/* --- BARRE DE FILTRES --- */}
                 <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-6 space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
                         <div className="md:col-span-3">
@@ -287,7 +274,6 @@ export default function VisitsListPage() {
                     </div>
                 </div>
 
-                {/* --- LISTE DES VISITES --- */}
                 {loading && visits.length === 0 ? (
                     <div className="text-center py-12 text-gray-500 animate-pulse">Chargement des visites...</div>
                 ) : (
@@ -301,56 +287,60 @@ export default function VisitsListPage() {
                             </div>
                         )}
 
-                        {displayedVisits.map(visit => (
-                            // Si c'est une visite en attente, on désactive le lien (ou on permet l'accès mais il faudra gérer l'ID temporaire dans la page détail)
-                            <Link 
-                                key={visit.id} 
-                                href={visit.__isPending ? '#' : `/dashboard/visits/${visit.id}`}
-                                className={visit.__isPending ? 'cursor-not-allowed' : ''}
-                            >
-                                <div className={`p-5 rounded-xl border transition-all duration-200 flex justify-between items-center group shadow-sm hover:shadow-md relative overflow-hidden ${
-                                    visit.__isPending 
-                                        ? 'bg-yellow-50 border-yellow-300 opacity-90' 
-                                        : visit.closed 
-                                            ? 'bg-white border-gray-200 opacity-90' 
-                                            : 'bg-white border-l-4 border-l-green-500 border-gray-100'
-                                }`}>
-                                    
-                                    {/* BANDEAU EN ATTENTE */}
-                                    {visit.__isPending && (
-                                        <div className="absolute top-0 right-0 bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-1 rounded-bl-lg z-10 animate-pulse">
-                                            ⏳ EN ATTENTE DE SYNCHRO
-                                        </div>
-                                    )}
+                        {displayedVisits.map(visit => {
+                            if (!visit || !visit.customer) {
+                                console.warn('Visite sans customer ignorée:', visit);
+                                return null;
+                            }
+                            
+                            return (
+                                <Link 
+                                    key={visit.id} 
+                                    href={visit.__isPending ? '#' : `/dashboard/visits/${visit.id}`}
+                                    className={visit.__isPending ? 'cursor-not-allowed' : ''}
+                                >
+                                    <div className={`p-5 rounded-xl border transition-all duration-200 flex justify-between items-center group shadow-sm hover:shadow-md relative overflow-hidden ${
+                                        visit.__isPending 
+                                            ? 'bg-yellow-50 border-yellow-300 opacity-90' 
+                                            : visit.closed 
+                                                ? 'bg-white border-gray-200 opacity-90' 
+                                                : 'bg-white border-l-4 border-l-green-500 border-gray-100'
+                                    }`}>
+                                        
+                                        {visit.__isPending && (
+                                            <div className="absolute top-0 right-0 bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-1 rounded-bl-lg z-10 animate-pulse">
+                                                ⏳ EN ATTENTE DE SYNCHRO
+                                            </div>
+                                        )}
 
-                                    <div>
-                                        <div className="flex items-center gap-3 mb-1">
-                                            <h2 className={`font-bold text-lg transition-colors ${visit.__isPending ? 'text-yellow-900' : 'text-gray-800 group-hover:text-indigo-700'}`}>
-                                                {visit.customer.name}
-                                            </h2>
-                                            {visit.__isPending ? (
-                                                // Pas de badge "En cours" ou "Clôturée" pour le pending, c'est implicite
-                                                null
-                                            ) : visit.closed ? (
-                                                <span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border border-gray-200">Clôturée</span>
-                                            ) : (
-                                                <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border border-green-200 animate-pulse">En cours</span>
-                                            )}
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-1">
+                                                <h2 className={`font-bold text-lg transition-colors ${visit.__isPending ? 'text-yellow-900' : 'text-gray-800 group-hover:text-indigo-700'}`}>
+                                                    {visit.customer?.name || 'INCONNU'}
+                                                </h2>
+                                                {visit.__isPending ? (
+                                                    null
+                                                ) : visit.closed ? (
+                                                    <span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border border-gray-200">Clôturée</span>
+                                                ) : (
+                                                    <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border border-green-200 animate-pulse">En cours</span>
+                                                )}
+                                            </div>
+                                            <div className="text-sm text-gray-500 flex flex-col md:flex-row gap-1 md:gap-3">
+                                                <span>📅 {new Date(visit.visitedAt).toLocaleDateString()} à {new Date(visit.visitedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                                <span className="hidden md:inline">•</span>
+                                                <span>📍 {visit.customer?.zone || 'Zone inconnue'}</span>
+                                            </div>
+                                            <p className="text-xs text-gray-400 mt-1">Tech: {visit.technician?.fullname || 'Inconnu'}</p>
                                         </div>
-                                        <div className="text-sm text-gray-500 flex flex-col md:flex-row gap-1 md:gap-3">
-                                            <span>📅 {new Date(visit.visitedAt).toLocaleDateString()} à {new Date(visit.visitedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                            <span className="hidden md:inline">•</span>
-                                            <span>📍 {visit.customer.zone}</span>
-                                        </div>
-                                        <p className="text-xs text-gray-400 mt-1">Tech: {visit.technician.fullname}</p>
+                                        
+                                        {!visit.__isPending && (
+                                            <div className="text-2xl text-gray-300 group-hover:text-indigo-500 transition-colors">→</div>
+                                        )}
                                     </div>
-                                    
-                                    {!visit.__isPending && (
-                                        <div className="text-2xl text-gray-300 group-hover:text-indigo-500 transition-colors">→</div>
-                                    )}
-                                </div>
-                            </Link>
-                        ))}
+                                </Link>
+                            );
+                        })}
                     </div>
                 )}
             </div>

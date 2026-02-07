@@ -11,7 +11,7 @@ export default function LoginPage() {
   const router = useRouter();
   
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
-  //console.log("API_URL utilisée:", API_URL); // Debug
+  console.log("API_URL utilisée:", API_URL); // Debug
 
   // ✅ 1. Vérification au chargement : A-t-on déjà un token ?
   useEffect(() => {
