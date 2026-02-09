@@ -3,11 +3,10 @@
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-// ✅ Import du composant de pré-chargement (assurez-vous d'avoir créé ce fichier)
 import CacheWarmer from '@/components/CacheWarmer'; 
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-    const { loading } = useAuth();
+    const { user, loading } = useAuth();
     const router = useRouter();
 
     const handleLogout = () => {
@@ -23,21 +22,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         );
     }
 
+    // ✅ Construction du nom complet
+    const displayName = user?.firstName && user?.lastName 
+        ? `${user.firstName} ${user.lastName}`
+        : user?.username;
+
     return (
         <div className="min-h-screen bg-gray-50">
-            {/* 🔥 CACHE WARMER : 
-               Ce composant est invisible. Il va télécharger silencieusement 
-               le code et les données des pages (Clients, Visites...) 
-               pour qu'elles soient disponibles instantanément en mode avion.
-            */}
             <CacheWarmer />
 
-            {/* --- BARRE DE NAVIGATION GLOBALE --- */}
             <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between h-16">
-                        {/* Côté Gauche : Retour Tableau de bord */}
-                        <div className="flex items-center">
+                        {/* Côté Gauche : Retour Tableau de bord + Nom utilisateur */}
+                        <div className="flex items-center gap-4">
                             <Link 
                                 href="/dashboard" 
                                 className="flex items-center text-gray-700 hover:text-indigo-600 font-bold transition-colors gap-2"
@@ -46,6 +44,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                 <span className="hidden sm:inline">Tableau de bord</span>
                                 <span className="sm:hidden">Accueil</span>
                             </Link>
+                            
+                            {/* Affichage du nom de l'utilisateur */}
+                            {user && (
+                                <div className="hidden md:flex items-center gap-2 pl-4 border-l border-gray-200">
+                                    <span className="text-2xl">👤</span>
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-bold text-gray-900">
+                                            {displayName}
+                                        </span>
+                                        {user.email && (
+                                            <span className="text-xs text-gray-500">{user.email}</span>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Côté Droit : Déconnexion */}
@@ -63,7 +76,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </div>
             </nav>
 
-            {/* --- CONTENU DE LA PAGE --- */}
             <main className="p-4 sm:p-6 max-w-7xl mx-auto">
                 {children}
             </main>

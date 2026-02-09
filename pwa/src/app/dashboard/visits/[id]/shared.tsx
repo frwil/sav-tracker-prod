@@ -3,7 +3,7 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 // --- TYPES ---
-export interface ProphylaxisTask { id: number; targetDay: number; name: string; type: string; }
+export interface ProphylaxisTask { id: number; targetDay: number; name: string; type: string; speculation?: string | { '@id'?: string; id?: number };}
 export interface Speculation { '@id': string; id: number; name: string; }
 
 export interface Problem {
