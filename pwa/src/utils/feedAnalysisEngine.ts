@@ -13,7 +13,7 @@ interface FeedInputs {
     stockFinal?: number;   // Kg (Inventaire jour J)
     
     // Branche B (Ingrédients)
-    formulaType?: 'CONC_5' | 'CONC_10';
+    formulaType?: 'CONC_5' | 'CONC_10'; 
     maizeConsumed?: number; // Calculé via (Stock Init + Achat - Stock Final)
     soyaConsumed?: number;
     concConsumed?: number;
