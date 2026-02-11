@@ -31,7 +31,13 @@ export const ReportFilters = ({ onFilter, isAdmin = false }: FilterProps) => {
                     });
                     if (res.ok) {
                         const data = await res.json();
-                        setTechs(data.map((u: any) => ({ value: u.id, label: u.username })));
+                        
+                        // 👇 MODIFICATION ICI : Filtrer par rôle
+                        const technicians = data.filter((user: any) => 
+                            user.roles && user.roles.includes("ROLE_TECHNICIAN")
+                        );
+
+                        setTechs(technicians.map((u: any) => ({ value: u.id, label: u.username })));
                     }
                 } catch(e) { console.error(e); }
             };
@@ -64,6 +70,7 @@ export const ReportFilters = ({ onFilter, isAdmin = false }: FilterProps) => {
                         onChange={(val: any) => setSelectedTechs(val)} 
                         className="text-sm"
                         placeholder="Tous les techniciens..."
+                        noOptionsMessage={() => "Aucun technicien trouvé"}
                     />
                 </div>
             )}

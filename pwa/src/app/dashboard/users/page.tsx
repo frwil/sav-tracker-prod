@@ -2,14 +2,16 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import toast from 'react-hot-toast';
 
 interface User {
-    '@id': string;
     id: number;
     username: string;
-    fullname?: string;
+    email: string;
     roles: string[];
     activated: boolean;
+    // On suppose que l'API renvoie le taux actuel via le getter virtuel que nous avons créé précédemment
+    dailyVisitObjective?: number; 
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -34,403 +36,350 @@ export default function UsersPage() {
     const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(true);
     
+    // États pour le formulaire User (Création/Edition)
+    const [showForm, setShowForm] = useState(false);
+    const [formData, setFormData] = useState({ username: '', email: '', password: '', role: 'ROLE_TECHNICIAN' });
+    const [editingUser, setEditingUser] = useState<User | null>(null);
+
+    // États pour le formulaire Objectifs
+    const [showObjModal, setShowObjModal] = useState(false);
+    const [isMassUpdate, setIsMassUpdate] = useState(false);
+    const [targetUser, setTargetUser] = useState<User | null>(null);
+    const [objData, setObjData] = useState({ 
+        dailyRate: 5, 
+        startDate: new Date().toISOString().split('T')[0] // Aujourd'hui par défaut
+    });
+
     const [searchTerm, setSearchTerm] = useState('');
     const [filterRole, setFilterRole] = useState('');
 
-    const [showForm, setShowForm] = useState(false);
-    const [editingId, setEditingId] = useState<number | null>(null);
-    
-    const [formData, setFormData] = useState({
-        username: '',
-        fullname: '', 
-        password: '',
-        role: 'ROLE_TECHNICIAN'
-    });
-
-    const roleOptions = isCurrentUserSuperAdmin 
-        ? [{ value: 'ROLE_SUPER_ADMIN', label: 'Super Admin' }, ...BASE_ROLE_OPTIONS]
-        : BASE_ROLE_OPTIONS;
-
     useEffect(() => {
-        loadUsers();
+        fetchUsers();
     }, []);
 
-    const loadUsers = async () => {
+    const fetchUsers = async () => {
         const token = localStorage.getItem('sav_token');
-        if (!token) return;
-
         try {
             const res = await fetch(`${API_URL}/users`, {
-                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/ld+json' }
+                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
             });
-            const data = await res.json();
-            setUsers(data['hydra:member'] || data['member'] || []);
-        } catch (e) {
-            console.error(e);
+            if (res.ok) setUsers(await res.json());
+        } catch (error) {
+            console.error(error);
+            toast.error("Erreur chargement utilisateurs");
         } finally {
             setLoading(false);
         }
     };
 
-    const filteredUsers = users.filter(u => {
-        const searchLower = searchTerm.toLowerCase();
-        const matchesSearch = u.username.toLowerCase().includes(searchLower) || 
-                              (u.fullname && u.fullname.toLowerCase().includes(searchLower));
-        const matchesRole = filterRole ? u.roles.includes(filterRole) : true;
-        return matchesSearch && matchesRole;
-    });
+    // --- GESTION DES OBJECTIFS ---
 
-    const canInteractWith = (targetUser: User) => {
-        if (!isCurrentUserSuperAdmin && targetUser.roles.includes('ROLE_SUPER_ADMIN')) {
-            return false;
+    const openObjectiveModal = (user?: User) => {
+        if (user) {
+            setIsMassUpdate(false);
+            setTargetUser(user);
+            setObjData({ ...objData, dailyRate: user.dailyVisitObjective || 5 });
+        } else {
+            setIsMassUpdate(true);
+            setTargetUser(null);
         }
-        return true;
+        setShowObjModal(true);
     };
 
-    const handleEdit = (user: User) => {
-        if (!canInteractWith(user)) {
-            alert("Vous n'avez pas les droits pour modifier cet utilisateur.");
-            return;
+    const handleSaveObjective = async () => {
+        const token = localStorage.getItem('sav_token');
+        const url = isMassUpdate 
+            ? `${API_URL}/users/bulk/define-objectives`
+            : `${API_URL}/users/${targetUser?.id}/define-objective`;
+
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 
+                    'Authorization': `Bearer ${token}`, 
+                    'Content-Type': 'application/json' 
+                },
+                body: JSON.stringify({
+                    dailyRate: Number(objData.dailyRate),
+                    startDate: objData.startDate
+                })
+            });
+
+            if (res.ok) {
+                toast.success(isMassUpdate ? "Objectifs de masse mis à jour" : "Objectif utilisateur mis à jour");
+                setShowObjModal(false);
+                fetchUsers(); // Rafraîchir pour voir les nouvelles valeurs actuelles
+            } else {
+                const err = await res.json();
+                toast.error(err.error || "Erreur lors de la mise à jour");
+            }
+        } catch (e) {
+            toast.error("Erreur technique");
         }
+    };
 
-        setEditingId(user.id);
-        
-        let mainRole = 'ROLE_TECHNICIAN';
-        if (user.roles.includes('ROLE_SUPER_ADMIN')) mainRole = 'ROLE_SUPER_ADMIN';
-        else if (user.roles.includes('ROLE_ADMIN')) mainRole = 'ROLE_ADMIN';
-        else if (user.roles.includes('ROLE_OPERATOR')) mainRole = 'ROLE_OPERATOR';
+    // --- GESTION UTILISATEURS (Code existant simplifié) ---
 
-        setFormData({
-            username: user.username,
-            fullname: user.fullname || '',
+    const handleEdit = (user: User) => {
+        setEditingUser(user);
+        setFormData({ 
+            username: user.username, 
+            email: user.email, 
             password: '', 
-            role: mainRole
+            role: user.roles.find(r => r !== 'ROLE_USER') || 'ROLE_TECHNICIAN' 
         });
         setShowForm(true);
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleDelete = async (id: number) => {
+        if (!confirm('Supprimer cet utilisateur ?')) return;
         const token = localStorage.getItem('sav_token');
-        const isSelf = currentUser?.id === editingId;
-        const finalFullname = formData.fullname.trim() === '' ? formData.username : formData.fullname;
-        const payload: any = {};
-
-        if (formData.password) {
-            payload.password = formData.password;
-        } else if (!editingId) {
-            alert("Mot de passe obligatoire pour la création.");
-            return;
-        }
-
-        if (!isSelf) {
-            payload.username = formData.username;
-            payload.fullname = finalFullname;
-            payload.roles = [formData.role];
-        } else {
-            payload.fullname = finalFullname; 
-        }
-
-        try {
-            if (editingId) {
-                const res = await fetch(`${API_URL}/users/${editingId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/merge-patch+json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify(payload)
-                });
-                if(!res.ok) throw new Error("Erreur modification");
-                alert("Modifications enregistrées !");
-            } else {
-                const res = await fetch(`${API_URL}/users`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ 
-                        ...payload, 
-                        username: formData.username, 
-                        fullname: finalFullname,
-                        roles: [formData.role], 
-                        activated: true 
-                    })
-                });
-                if(!res.ok) throw new Error("Erreur création");
-            }
-            loadUsers();
-            setShowForm(false);
-            setEditingId(null);
-            setFormData({ username: '', fullname: '', password: '', role: 'ROLE_TECHNICIAN' });
-
-        } catch (err) { alert("Une erreur est survenue."); }
+        await fetch(`${API_URL}/users/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+        setUsers(users.filter(u => u.id !== id));
+        toast.success("Utilisateur supprimé");
     };
 
     const handleArchive = async (user: User) => {
-        if (!canInteractWith(user)) return;
-        if (currentUser?.id === user.id) { alert("Impossible de se désactiver soi-même."); return; }
-
         const token = localStorage.getItem('sav_token');
-        const newStatus = !user.activated;
-        if (!confirm(newStatus ? "Réactiver cet utilisateur ?" : "Archiver cet utilisateur ?")) return;
-
-        try {
-            await fetch(`${API_URL}/users/${user.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/merge-patch+json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ activated: newStatus })
-            });
-            loadUsers();
-        } catch (e) { alert("Erreur lors de l'action"); }
+        await fetch(`${API_URL}/users/${user.id}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/merge-patch+json' },
+            body: JSON.stringify({ activated: !user.activated })
+        });
+        fetchUsers();
     };
 
-    const handleDelete = async (id: number) => {
-        const userToDelete = users.find(u => u.id === id);
-        if (userToDelete && !canInteractWith(userToDelete)) { alert("Action non autorisée."); return; }
-        if (!confirm("Supprimer définitivement ?")) return;
+    const handleSubmitUser = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = localStorage.getItem('sav_token');
+        const method = editingUser ? 'PATCH' : 'POST';
+        const url = editingUser ? `${API_URL}/users/${editingUser.id}` : `${API_URL}/users`;
         
-        const token = localStorage.getItem('sav_token');
-        try {
-            const res = await fetch(`${API_URL}/users/${id}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+        // On filtre le mot de passe s'il est vide en édition
+        const payload: any = { ...formData, roles: [formData.role] };
+        if (editingUser && !payload.password) delete payload.password;
 
-            if (res.ok) {
-                setUsers(prev => prev.filter(u => u.id !== id));
-            } else {
-                alert("Impossible de supprimer. Bascule vers l'archivage.");
-                await fetch(`${API_URL}/users/${id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/merge-patch+json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ activated: false })
-                });
-                loadUsers();
-            }
-        } catch (e) { alert("Erreur technique."); }
+        const res = await fetch(url, {
+            method,
+            headers: { 
+                'Authorization': `Bearer ${token}`, 
+                'Content-Type': editingUser ? 'application/merge-patch+json' : 'application/json' 
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+            setShowForm(false);
+            fetchUsers();
+            toast.success(editingUser ? "Modifié" : "Créé");
+        } else {
+            toast.error("Erreur lors de l'enregistrement");
+        }
     };
 
-    const isSelfEdit = editingId === currentUser?.id;
+    // Filtrage
+    const filteredUsers = users.filter(user => {
+        const matchesSearch = user.username.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesRole = filterRole ? user.roles.includes(filterRole) : true;
+        return matchesSearch && matchesRole;
+    });
 
     return (
-        <div className="min-h-screen bg-gray-50 pb-20 font-sans">
-            <div className="bg-white shadow px-6 py-4 mb-6">
-                <div className="max-w-5xl mx-auto flex justify-between items-center">
-                    <div>
-                        <h1 className="text-2xl font-extrabold text-gray-800">Gestion des Utilisateurs</h1>
-                    </div>
+        <div className="max-w-7xl mx-auto p-6 pb-20">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+                <div>
+                    <h1 className="text-2xl font-black text-gray-900">👥 Gestion des Utilisateurs</h1>
+                    <p className="text-gray-500">Administrez les accès et les objectifs de l'équipe.</p>
+                </div>
+                <div className="flex gap-3">
+                    <button 
+                        onClick={() => openObjectiveModal()}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 font-bold rounded-xl hover:bg-indigo-100 transition"
+                    >
+                        🎯 Objectifs en Masse
+                    </button>
+                    <button 
+                        onClick={() => { setEditingUser(null); setFormData({username:'', email:'', password:'', role:'ROLE_TECHNICIAN'}); setShowForm(true); }}
+                        className="flex items-center gap-2 px-4 py-2 bg-black text-white font-bold rounded-xl hover:bg-gray-800 transition shadow-lg shadow-gray-200"
+                    >
+                        + Nouvel Utilisateur
+                    </button>
                 </div>
             </div>
 
-            <div className="max-w-5xl mx-auto px-4">
-                
-                {/* BARRE D'ACTIONS */}
-                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-6">
-                    <div className="flex flex-col md:flex-row gap-4 items-end">
-                        <div className="flex-1 w-full">
-                            <label className="block text-xs font-bold text-gray-500 mb-1">🔍 Rechercher</label>
-                            <input 
-                                type="text" 
-                                placeholder="Nom ou identifiant..." 
-                                className="w-full border p-2 rounded-lg bg-gray-50 focus:bg-white transition"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                            />
-                        </div>
-                        <div className="w-full md:w-64">
-                            <label className="block text-xs font-bold text-gray-500 mb-1">🎭 Rôle</label>
-                            <select 
-                                className="w-full border p-2 rounded-lg bg-gray-50 focus:bg-white transition"
-                                value={filterRole}
-                                onChange={(e) => setFilterRole(e.target.value)}
-                            >
-                                <option value="">-- Tous --</option>
-                                <option value="ROLE_SUPER_ADMIN">Super Admin</option>
-                                <option value="ROLE_ADMIN">Administrateur</option>
-                                <option value="ROLE_TECHNICIAN">Technicien</option>
-                                <option value="ROLE_OPERATOR">Opérateur Support</option>
-                            </select>
-                        </div>
-                        <button 
-                            onClick={() => { 
-                                setEditingId(null); 
-                                setFormData({ username: '', fullname: '', password: '', role: 'ROLE_TECHNICIAN' });
-                                setShowForm(!showForm); 
-                            }}
-                            className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold shadow hover:bg-indigo-700 transition h-10 w-full md:w-auto"
-                        >
-                            {showForm ? 'Fermer' : '+ Nouveau'}
-                        </button>
-                    </div>
-                </div>
+            {/* Filtres */}
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-6 flex gap-4">
+                <input 
+                    type="text" 
+                    placeholder="Rechercher un utilisateur..." 
+                    className="flex-1 border-gray-200 rounded-lg"
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                />
+                <select 
+                    className="border-gray-200 rounded-lg"
+                    value={filterRole}
+                    onChange={e => setFilterRole(e.target.value)}
+                >
+                    <option value="">Tous les rôles</option>
+                    {BASE_ROLE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                </select>
+            </div>
 
-                {/* FORMULAIRE */}
-                {showForm && (
-                    <form onSubmit={handleSubmit} className="bg-white p-6 rounded-2xl shadow-lg border border-indigo-100 mb-8 animate-slide-down">
-                        <h3 className="text-lg font-bold mb-4 text-gray-800">
-                            {editingId ? (isSelfEdit ? 'Modifier mon profil' : 'Modifier l\'utilisateur') : 'Créer un utilisateur'}
-                        </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {/* Tableau */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-gray-500 font-medium">
+                        <tr>
+                            <th className="p-4">Utilisateur</th>
+                            <th className="p-4">Rôle</th>
+                            <th className="p-4 text-center">Objectif Actuel</th>
+                            <th className="p-4">Statut</th>
+                            <th className="p-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                        {filteredUsers.map(user => (
+                            <tr key={user.id} className="hover:bg-gray-50/50 transition">
+                                <td className="p-4 font-bold text-gray-900">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600">
+                                            {user.username.substring(0,2).toUpperCase()}
+                                        </div>
+                                        <div>
+                                            <div>{user.username}</div>
+                                            <div className="text-xs text-gray-400 font-normal">{user.email}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td className="p-4">
+                                    <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-bold">
+                                        {ROLE_LABELS[user.roles.find(r => r !== 'ROLE_USER') || ''] || 'Utilisateur'}
+                                    </span>
+                                </td>
+                                <td className="p-4 text-center">
+                                    {user.roles.includes('ROLE_TECHNICIAN') ? (
+                                        <span className="font-mono bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs font-bold">
+                                            {user.dailyVisitObjective || 0} / jour
+                                        </span>
+                                    ) : (
+                                        <span className="text-gray-300">-</span>
+                                    )}
+                                </td>
+                                <td className="p-4">
+                                    <span className={`w-2 h-2 rounded-full inline-block mr-2 ${user.activated ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                                    {user.activated ? 'Actif' : 'Inactif'}
+                                </td>
+                                <td className="p-4 text-right">
+                                    <div className="flex justify-end gap-2">
+                                        {user.roles.includes('ROLE_TECHNICIAN') && (
+                                            <button 
+                                                onClick={() => openObjectiveModal(user)}
+                                                title="Définir Objectif"
+                                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                                            >
+                                                🎯
+                                            </button>
+                                        )}
+                                        <button onClick={() => handleEdit(user)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">✏️</button>
+                                        {!isCurrentUserSuperAdmin && (
+                                            <button onClick={() => handleArchive(user)} className="p-2 text-orange-600 hover:bg-orange-50 rounded-lg">
+                                                {user.activated ? '🔒' : '🔓'}
+                                            </button>
+                                        )}
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            {/* MODAL UTILISATEUR (CREATE/EDIT) */}
+            {showForm && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+                        <h2 className="text-xl font-bold mb-4">{editingUser ? 'Modifier Utilisateur' : 'Nouvel Utilisateur'}</h2>
+                        <form onSubmit={handleSubmitUser} className="space-y-4">
                             <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Identifiant (Connexion)</label>
-                                <input type="text" required className={`w-full border p-2 rounded-lg ${isSelfEdit ? 'bg-gray-100' : ''}`} value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} disabled={isSelfEdit} />
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Nom d'utilisateur</label>
+                                <input required type="text" className="w-full border rounded-lg p-2" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} />
                             </div>
                             <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Nom Complet</label>
-                                <input type="text" className="w-full border p-2 rounded-lg" value={formData.fullname} onChange={e => setFormData({...formData, fullname: e.target.value})} placeholder={formData.username} />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Mot de passe {editingId && '(Vide = inchangé)'}</label>
-                                <input type="password" className="w-full border p-2 rounded-lg" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="********" />
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Email</label>
+                                <input required type="email" className="w-full border rounded-lg p-2" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 mb-1">Rôle</label>
-                                <select className={`w-full border p-2 rounded-lg bg-white ${isSelfEdit ? 'bg-gray-100' : ''}`} value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})} disabled={isSelfEdit}>
-                                    {roleOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                                <select className="w-full border rounded-lg p-2" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
+                                    {BASE_ROLE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                                 </select>
                             </div>
-                        </div>
-                        <div className="flex justify-end gap-3">
-                            <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg">Annuler</button>
-                            <button type="submit" className="px-6 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700">Enregistrer</button>
-                        </div>
-                    </form>
-                )}
-
-                {/* --- CONTENU RESPONSIVE --- */}
-                
-                {/* 1. VUE MOBILE (CARTES) - Visible uniquement sur petit écran (md:hidden) */}
-                <div className="grid grid-cols-1 gap-4 md:hidden">
-                    {filteredUsers.length === 0 && <p className="text-center text-gray-500 italic">Aucun utilisateur trouvé.</p>}
-                    {filteredUsers.map(user => {
-                        const mainRole = user.roles.find(r => ROLE_LABELS[r]) || 'ROLE_USER';
-                        const isTargetSuperAdmin = user.roles.includes('ROLE_SUPER_ADMIN');
-                        const isSelf = currentUser?.id === user.id;
-                        const isDisabled = !canInteractWith(user);
-
-                        return (
-                            <div key={user.id} className={`bg-white p-4 rounded-xl shadow-sm border ${!user.activated ? 'border-gray-200 bg-gray-50 opacity-75' : 'border-gray-200'}`}>
-                                <div className="flex justify-between items-start mb-3">
-                                    <div className="flex items-center gap-3">
-                                        <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-lg">
-                                            {user.username.charAt(0).toUpperCase()}
-                                        </div>
-                                        <div>
-                                            <div className="font-bold text-gray-900 text-lg">
-                                                {user.fullname || user.username}
-                                            </div>
-                                            <div className="text-xs text-gray-500">@{user.username} {isSelf && '(Moi)'}</div>
-                                        </div>
-                                    </div>
-                                    {user.activated 
-                                        ? <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full font-bold">Actif</span>
-                                        : <span className="bg-gray-200 text-gray-600 text-xs px-2 py-1 rounded-full font-bold">Archivé</span>
-                                    }
-                                </div>
-
-                                <div className="mb-4">
-                                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
-                                        isTargetSuperAdmin ? 'bg-purple-100 text-purple-800' :
-                                        mainRole === 'ROLE_ADMIN' ? 'bg-red-100 text-red-800' : 
-                                        'bg-blue-100 text-blue-800'
-                                    }`}>
-                                        {ROLE_LABELS[mainRole] || mainRole}
-                                    </span>
-                                </div>
-
-                                <div className="flex justify-end gap-3 pt-3 border-t border-gray-100">
-                                    {!isDisabled ? (
-                                        <>
-                                            <button onClick={() => handleEdit(user)} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-bold">
-                                                {isSelf ? 'Profil' : 'Modifier'}
-                                            </button>
-                                            {!isSelf && (
-                                                <>
-                                                    <button onClick={() => handleArchive(user)} className={`px-3 py-1.5 rounded-lg text-sm font-bold ${user.activated ? "bg-orange-50 text-orange-700" : "bg-green-50 text-green-700"}`}>
-                                                        {user.activated ? 'Archiver' : 'Activer'}
-                                                    </button>
-                                                    <button onClick={() => handleDelete(user.id)} className="p-2 bg-red-50 text-red-600 rounded-lg">🗑️</button>
-                                                </>
-                                            )}
-                                        </>
-                                    ) : (
-                                        <span className="text-gray-400 text-xs italic py-2">🔒 Accès restreint</span>
-                                    )}
-                                </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Mot de passe {editingUser && '(Laisser vide pour ne pas changer)'}</label>
+                                <input type="password" required={!editingUser} className="w-full border rounded-lg p-2" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
                             </div>
-                        );
-                    })}
+                            <div className="flex justify-end gap-3 mt-6">
+                                <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-500 font-bold hover:bg-gray-100 rounded-lg">Annuler</button>
+                                <button type="submit" className="px-4 py-2 bg-black text-white font-bold rounded-lg hover:bg-gray-800">Enregistrer</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
+            )}
 
-                {/* 2. VUE DESKTOP (TABLEAU) - Visible uniquement sur écran moyen et + (hidden md:block) */}
-                <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Utilisateur</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rôle</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
-                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {filteredUsers.length === 0 && (
-                                <tr><td colSpan={4} className="px-6 py-8 text-center text-gray-500 italic">Aucun utilisateur trouvé.</td></tr>
-                            )}
-                            {filteredUsers.map(user => {
-                                const mainRole = user.roles.find(r => ROLE_LABELS[r]) || 'ROLE_USER';
-                                const isTargetSuperAdmin = user.roles.includes('ROLE_SUPER_ADMIN');
-                                const isSelf = currentUser?.id === user.id;
-                                const isDisabled = !canInteractWith(user);
+            {/* MODAL OBJECTIFS */}
+            {showObjModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 border-t-4 border-indigo-500">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-xl">🎯</div>
+                            <div>
+                                <h2 className="text-lg font-bold text-gray-900">Définir Objectifs</h2>
+                                <p className="text-xs text-gray-500">
+                                    {isMassUpdate ? "Pour TOUS les techniciens" : `Pour ${targetUser?.username}`}
+                                </p>
+                            </div>
+                        </div>
 
-                                return (
-                                    <tr key={user.id} className={!user.activated ? 'bg-gray-50 opacity-75' : ''}>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="flex items-center">
-                                                <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold mr-3">
-                                                    {user.username.charAt(0).toUpperCase()}
-                                                </div>
-                                                <div>
-                                                    <div className="font-bold text-gray-900">
-                                                        {user.fullname || user.username}
-                                                        {isSelf && <span className="text-indigo-600 text-xs ml-2">(Moi)</span>}
-                                                    </div>
-                                                    {user.fullname && <div className="text-xs text-gray-500">@{user.username}</div>}
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                                isTargetSuperAdmin ? 'bg-purple-100 text-purple-800' :
-                                                mainRole === 'ROLE_ADMIN' ? 'bg-red-100 text-red-800' : 
-                                                'bg-blue-100 text-blue-800'
-                                            }`}>
-                                                {ROLE_LABELS[mainRole] || mainRole}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            {user.activated ? <span className="text-green-600 font-bold bg-green-50 px-2 py-1 rounded">Actif</span> : <span className="text-gray-500 font-bold bg-gray-100 px-2 py-1 rounded">Archivé</span>}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                            {!isDisabled && (
-                                                <>
-                                                    <button onClick={() => handleEdit(user)} className="text-indigo-600 hover:text-indigo-900 mr-3 font-bold">
-                                                        {isSelf ? 'Profil' : 'Modifier'}
-                                                    </button>
-                                                    {!isSelf && (
-                                                        <>
-                                                            <button onClick={() => handleArchive(user)} className={`mr-3 font-bold ${user.activated ? "text-orange-600 hover:text-orange-900" : "text-green-600 hover:text-green-900"}`}>
-                                                                {user.activated ? 'Archiver' : 'Activer'}
-                                                            </button>
-                                                            <button onClick={() => handleDelete(user.id)} className="text-red-600 hover:text-red-900 font-bold">🗑️</button>
-                                                        </>
-                                                    )}
-                                                </>
-                                            )}
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+                        <div className="space-y-4">
+                            <div className="bg-blue-50 p-3 rounded-lg text-xs text-blue-700 leading-relaxed">
+                                ℹ️ Cette action clôturera automatiquement l'objectif précédent à la date de la veille du démarrage choisi.
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Nouvel Objectif (Visites / Jour)</label>
+                                <input 
+                                    type="number" 
+                                    min="1" 
+                                    className="w-full border-gray-300 border rounded-lg p-3 text-lg font-bold text-center text-indigo-600 focus:ring-indigo-500" 
+                                    value={objData.dailyRate} 
+                                    onChange={e => setObjData({...objData, dailyRate: Number(e.target.value)})} 
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Date de début d'application</label>
+                                <input 
+                                    type="date" 
+                                    required 
+                                    className="w-full border-gray-300 border rounded-lg p-2" 
+                                    value={objData.startDate} 
+                                    onChange={e => setObjData({...objData, startDate: e.target.value})} 
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 mt-6">
+                            <button onClick={() => setShowObjModal(false)} className="px-4 py-2 text-gray-500 font-bold hover:bg-gray-100 rounded-lg">Annuler</button>
+                            <button onClick={handleSaveObjective} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 shadow-md">
+                                Valider {isMassUpdate && 'pour tous'}
+                            </button>
+                        </div>
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 }

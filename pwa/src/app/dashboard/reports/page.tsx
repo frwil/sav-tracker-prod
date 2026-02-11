@@ -50,6 +50,14 @@ const REPORTS = [
         desc: "Analyse des coûts alimentaires et Indices de Consommation.",
         color: "orange",
         href: "/dashboard/reports/aliment"
+    },
+    { 
+        id: "adherence", 
+        title: "Adhérence & Planning", 
+        icon: "🎯", 
+        desc: "Analyse de la ponctualité et du respect des tournées.", 
+        color: "teal",
+        href: "/dashboard/reports/adherence"
     }
 ];
 
