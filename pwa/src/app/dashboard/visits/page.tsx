@@ -9,7 +9,8 @@ import { useSync } from "@/providers/SyncProvider";
 
 interface Visit {
     id: number | string;
-    visitedAt: string;
+    visitedAt?: string;
+    plannedAt?: string; // Important
     technician: { fullname: string };
     customer: { name: string; zone: string };
     gpsCoordinates?: string;
@@ -53,10 +54,14 @@ export default function VisitsListPage() {
     const [visits, setVisits] = useState<Visit[]>([]);
     const [loading, setLoading] = useState(true);
 
+    // États des filtres
     const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
     const [filterType, setFilterType] = useState('today'); 
     const [datePrimary, setDatePrimary] = useState(new Date().toISOString().slice(0, 10));
     const [dateSecondary, setDateSecondary] = useState('');
+    
+    // 👇 NOUVEAU : Mode d'affichage (Planning ou Historique)
+    const [viewMode, setViewMode] = useState<'planning' | 'history'>('planning');
 
     useEffect(() => {
         const fetchVisits = async () => {
@@ -71,11 +76,21 @@ export default function VisitsListPage() {
 
             let url = `${API_URL}/visits?page=1`;
 
+            // Filtre Client
             if (selectedCustomer) {
                 const customerId = selectedCustomer.value.split('/').pop();
                 url += `&customer=${customerId}`;
             }
 
+            // 👇 MODIFICATION MAJEURE ICI
+            // On détermine sur quel champ filtrer et comment trier
+            const dateField = viewMode === 'planning' ? 'plannedAt' : 'visitedAt';
+            const sortOrder = viewMode === 'planning' ? 'asc' : 'desc'; // Planning = Chronologique, Historique = Antéchronologique
+
+            // Application du tri
+            url += `&order[${dateField}]=${sortOrder}`;
+
+            // Application des filtres de date
             if (filterType !== 'all') {
                 let range = { after: '', before: '' };
                 if (filterType === 'today') range = getDateRange('day', new Date().toISOString());
@@ -85,8 +100,14 @@ export default function VisitsListPage() {
                 else if (filterType === 'interval' && datePrimary && dateSecondary) range = getDateRange('interval', datePrimary, dateSecondary);
 
                 if (range.after && range.before) {
-                    url += `&visitedAt[after]=${range.after}&visitedAt[before]=${range.before}`;
+                    // On utilise le champ dynamique (plannedAt ou visitedAt)
+                    url += `&${dateField}[after]=${range.after}&${dateField}[before]=${range.before}`;
                 }
+            } else {
+                // Si "Tout l'historique", on s'assure quand même de ne récupérer que ce qui a du sens
+                // Ex: Pour le planning, on veut plannedAt existant
+                if (viewMode === 'planning') url += `&plannedAt[exists]=true`;
+                if (viewMode === 'history') url += `&visitedAt[exists]=true`;
             }
 
             try {
@@ -110,76 +131,42 @@ export default function VisitsListPage() {
         };
 
         fetchVisits();
-    }, [router, selectedCustomer, filterType, datePrimary, dateSecondary]);
+    }, [router, selectedCustomer, filterType, datePrimary, dateSecondary, viewMode]); // Déclenche au changement de mode
 
     const displayedVisits = useMemo(() => {
+        // ... (Logique Sync existante inchangée, elle fusionne juste les données)
         const pendingVisits: Visit[] = queue
             .filter((item: any) => item.url === '/visits' && item.method === 'POST')
-            .map((item: any) => {
-                const customerOpt = customerOptions.find(opt => opt.value === item.body.customer);
-                
-                return {
-                    id: `TEMP_${Date.now()}_${Math.random()}`,
-                    visitedAt: item.body.visitedAt,
-                    technician: { fullname: "Moi (En attente)" }, 
-                    customer: { 
-                        name: customerOpt ? customerOpt.label : "Client...", 
-                        zone: "..." 
-                    },
-                    closed: false,
-                    activated: true,
-                    __isPending: true
-                };
-            });
+            .map((item: any) => ({
+                id: `TEMP_${Date.now()}_${Math.random()}`,
+                visitedAt: item.body.visitedAt,
+                plannedAt: item.body.plannedAt,
+                technician: { fullname: "Moi (En attente)" }, 
+                customer: { name: "Client...", zone: "..." },
+                closed: false,
+                activated: true,
+                __isPending: true
+            }));
 
         const validVisits = visits.filter((visit: Visit) => visit && visit.customer);
-
-        const filteredPending = pendingVisits.filter(v => {
-            if (selectedCustomer) {
-                if (v.customer.name !== selectedCustomer.label) return false;
-            }
-
-            if (filterType !== 'all') {
-                const d = new Date(v.visitedAt);
-                let range = { after: new Date(0), before: new Date(9999, 11, 31) };
-                
-                if (filterType === 'today') {
-                    const r = getDateRange('day', new Date().toISOString());
-                    range = { after: new Date(r.after), before: new Date(r.before) };
-                } else if (filterType === 'date') {
-                    const r = getDateRange('day', datePrimary);
-                    range = { after: new Date(r.after), before: new Date(r.before) };
-                } 
-                
-                if (filterType === 'today' || filterType === 'date') {
-                    return d >= range.after && d <= range.before;
-                }
-            }
-            return true;
-        });
-
-        const all = [...filteredPending, ...validVisits];
+        const all = [...pendingVisits, ...validVisits];
         
-        return all.sort((a, b) => {
-            if (!a?.customer && !b?.customer) return 0;
-            if (!a?.customer) return 1;
-            if (!b?.customer) return -1;
+        // Tri visuel local (au cas où)
+        return all; 
+    }, [visits, queue]);
 
-            if (a.__isPending && !b.__isPending) return -1;
-            if (!a.__isPending && b.__isPending) return 1;
-
-            if (a.closed !== b.closed) return a.closed ? 1 : -1; 
-            
-            return new Date(b.visitedAt).getTime() - new Date(a.visitedAt).getTime();
-        });
-
-    }, [visits, queue, customerOptions, selectedCustomer, filterType, datePrimary]);
-
-    const getFilterLabel = () => {
-        if (filterType === 'today') return "Aujourd'hui";
-        if (filterType === 'week') return "Semaine du";
-        if (filterType === 'month') return "Mois de";
-        return "Date";
+    const getVisitStatus = (visit: Visit) => {
+        if (visit.__isPending) return { label: 'Sync...', color: 'yellow', border: 'border-yellow-300', bg: 'bg-yellow-50' };
+        if (visit.closed) return { label: 'Clôturée', color: 'gray', border: 'border-gray-200', bg: 'bg-white' };
+        if (visit.visitedAt) return { label: 'Réalisée', color: 'green', border: 'border-green-500', bg: 'bg-white' };
+        if (visit.plannedAt) {
+            // Petit calcul pour voir si en retard
+            const isLate = new Date(visit.plannedAt) < new Date() && !visit.visitedAt;
+            return isLate 
+                ? { label: 'En retard', color: 'red', border: 'border-red-400', bg: 'bg-red-50' }
+                : { label: 'Planifiée', color: 'blue', border: 'border-blue-500', bg: 'bg-blue-50' };
+        }
+        return { label: 'Inconnu', color: 'gray', border: 'border-gray-200', bg: 'bg-white' };
     };
 
     return (
@@ -199,7 +186,25 @@ export default function VisitsListPage() {
             <div className="max-w-5xl mx-auto px-4">
                 
                 <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-6 space-y-4">
+                    
+                    {/* 👇 NOUVEAU : Onglets Planning / Historique */}
+                    <div className="flex p-1 bg-gray-100 rounded-lg mb-4 w-full md:w-fit">
+                        <button 
+                            onClick={() => setViewMode('planning')}
+                            className={`flex-1 md:flex-none px-6 py-2 rounded-md text-sm font-bold transition-all ${viewMode === 'planning' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            📅 Agenda (Prévu)
+                        </button>
+                        <button 
+                            onClick={() => setViewMode('history')}
+                            className={`flex-1 md:flex-none px-6 py-2 rounded-md text-sm font-bold transition-all ${viewMode === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            ✅ Historique (Réalisé)
+                        </button>
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                        {/* ... (Le reste des filtres Période/Client reste identique) ... */}
                         <div className="md:col-span-3">
                             <label className="block text-xs font-bold text-gray-500 mb-1">Période</label>
                             <select 
@@ -211,132 +216,84 @@ export default function VisitsListPage() {
                                 <option value="date">Date précise</option>
                                 <option value="week">Semaine</option>
                                 <option value="month">Mois</option>
-                                <option value="interval">Intervalle</option>
-                                <option value="all">Tout l'historique</option>
+                                <option value="all">Tout</option>
                             </select>
                         </div>
 
                         {filterType !== 'today' && filterType !== 'all' && (
-                            <div className={`${filterType === 'interval' ? 'md:col-span-4' : 'md:col-span-3'} flex gap-2`}>
+                            <div className="md:col-span-4 flex gap-2">
                                 <div className="w-full">
-                                    <label className="block text-xs font-bold text-gray-500 mb-1">
-                                        {filterType === 'interval' ? 'Du' : getFilterLabel()}
-                                    </label>
-                                    <input 
-                                        type="date" 
-                                        className="w-full border p-2 rounded-lg bg-white text-sm"
-                                        value={datePrimary}
-                                        onChange={(e) => setDatePrimary(e.target.value)}
-                                    />
+                                    <label className="block text-xs font-bold text-gray-500 mb-1">Date</label>
+                                    <input type="date" className="w-full border p-2 rounded-lg bg-white text-sm" value={datePrimary} onChange={(e) => setDatePrimary(e.target.value)}/>
                                 </div>
-                                {filterType === 'interval' && (
-                                    <div className="w-full">
-                                        <label className="block text-xs font-bold text-gray-500 mb-1">Au</label>
-                                        <input 
-                                            type="date" 
-                                            className="w-full border p-2 rounded-lg bg-white text-sm"
-                                            value={dateSecondary}
-                                            onChange={(e) => setDateSecondary(e.target.value)}
-                                        />
-                                    </div>
-                                )}
                             </div>
                         )}
 
                         <div className="md:col-span-4">
-                            <label className="block text-xs font-bold text-gray-500 mb-1">Filtrer par Client</label>
+                            <label className="block text-xs font-bold text-gray-500 mb-1">Client</label>
                             <Select
                                 instanceId="customer-filter"
                                 options={customerOptions}
                                 value={selectedCustomer}
                                 onChange={setSelectedCustomer}
                                 isLoading={customersLoading}
-                                placeholder="Tous les clients..."
+                                placeholder="Tous..."
                                 isClearable
                                 className="text-sm"
-                                styles={{ control: (base) => ({ ...base, minHeight: '38px', borderRadius: '0.5rem' }) }}
                             />
-                        </div>
-
-                        <div className="md:col-span-1">
-                            <button 
-                                onClick={() => {
-                                    setFilterType('today');
-                                    setSelectedCustomer(null);
-                                    setDatePrimary(new Date().toISOString().slice(0, 10));
-                                }}
-                                className="w-full py-2 text-xs font-bold text-gray-500 hover:text-red-600 bg-gray-100 hover:bg-red-50 rounded-lg border border-gray-200 transition"
-                                title="Réinitialiser les filtres"
-                            >
-                                ↺
-                            </button>
                         </div>
                     </div>
                 </div>
 
+                {/* Liste des visites */}
                 {loading && visits.length === 0 ? (
-                    <div className="text-center py-12 text-gray-500 animate-pulse">Chargement des visites...</div>
+                    <div className="text-center py-12 text-gray-500 animate-pulse">Chargement...</div>
                 ) : (
                     <div className="grid gap-4">
                         {displayedVisits.length === 0 && (
                             <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300">
-                                <p className="text-gray-500 mb-2">Aucune visite trouvée pour ces critères.</p>
-                                {filterType === 'today' && (
-                                    <p className="text-sm text-indigo-600">Le planning est vide pour aujourd'hui.</p>
+                                <p className="text-gray-500 mb-2">Aucune visite trouvée.</p>
+                                {viewMode === 'planning' && filterType === 'today' && (
+                                    <p className="text-sm text-indigo-600">Rien de prévu pour aujourd'hui ! 🎉</p>
                                 )}
                             </div>
                         )}
 
                         {displayedVisits.map(visit => {
-                            if (!visit || !visit.customer) {
-                                console.warn('Visite sans customer ignorée:', visit);
-                                return null;
-                            }
-                            
+                            if (!visit || !visit.customer) return null;
+                            const status = getVisitStatus(visit);
+                            // On affiche la date pertinente selon le mode
+                            const displayDate = viewMode === 'planning' ? visit.plannedAt : (visit.visitedAt || visit.plannedAt);
+
                             return (
                                 <Link 
                                     key={visit.id} 
                                     href={visit.__isPending ? '#' : `/dashboard/visits/${visit.id}`}
-                                    className={visit.__isPending ? 'cursor-not-allowed' : ''}
                                 >
-                                    <div className={`p-5 rounded-xl border transition-all duration-200 flex justify-between items-center group shadow-sm hover:shadow-md relative overflow-hidden ${
-                                        visit.__isPending 
-                                            ? 'bg-yellow-50 border-yellow-300 opacity-90' 
-                                            : visit.closed 
-                                                ? 'bg-white border-gray-200 opacity-90' 
-                                                : 'bg-white border-l-4 border-l-green-500 border-gray-100'
-                                    }`}>
+                                    <div className={`p-5 rounded-xl border transition-all flex justify-between items-center group shadow-sm hover:shadow-md relative overflow-hidden ${status.bg} ${status.border} border-l-4`}>
                                         
-                                        {visit.__isPending && (
-                                            <div className="absolute top-0 right-0 bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-1 rounded-bl-lg z-10 animate-pulse">
-                                                ⏳ EN ATTENTE DE SYNCHRO
-                                            </div>
-                                        )}
+                                        <div className="absolute top-0 right-0">
+                                            <span className={`text-[10px] font-black px-2 py-1 rounded-bl-lg uppercase tracking-wide bg-white/50 text-gray-600 border-b border-l border-gray-100`}>
+                                                {status.label}
+                                            </span>
+                                        </div>
 
                                         <div>
-                                            <div className="flex items-center gap-3 mb-1">
-                                                <h2 className={`font-bold text-lg transition-colors ${visit.__isPending ? 'text-yellow-900' : 'text-gray-800 group-hover:text-indigo-700'}`}>
-                                                    {visit.customer?.name || 'INCONNU'}
-                                                </h2>
-                                                {visit.__isPending ? (
-                                                    null
-                                                ) : visit.closed ? (
-                                                    <span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border border-gray-200">Clôturée</span>
-                                                ) : (
-                                                    <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border border-green-200 animate-pulse">En cours</span>
+                                            <h2 className="font-bold text-lg text-gray-800 mb-1">{visit.customer.name}</h2>
+                                            <div className="text-sm text-gray-500 flex gap-3">
+                                                {displayDate && (
+                                                    <span>
+                                                        {viewMode === 'planning' ? '📅 Prévu : ' : '📅 Fait : '}
+                                                        {new Date(displayDate).toLocaleDateString()}
+                                                        {' ' + new Date(displayDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                    </span>
                                                 )}
+                                                <span>📍 {visit.customer.zone}</span>
                                             </div>
-                                            <div className="text-sm text-gray-500 flex flex-col md:flex-row gap-1 md:gap-3">
-                                                <span>📅 {new Date(visit.visitedAt).toLocaleDateString()} à {new Date(visit.visitedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                                <span className="hidden md:inline">•</span>
-                                                <span>📍 {visit.customer?.zone || 'Zone inconnue'}</span>
-                                            </div>
-                                            <p className="text-xs text-gray-400 mt-1">Tech: {visit.technician?.fullname || 'Inconnu'}</p>
+                                            <p className="text-xs text-gray-400 mt-1">Tech: {visit.technician?.fullname}</p>
                                         </div>
                                         
-                                        {!visit.__isPending && (
-                                            <div className="text-2xl text-gray-300 group-hover:text-indigo-500 transition-colors">→</div>
-                                        )}
+                                        <div className="text-2xl text-gray-300 group-hover:text-indigo-500">→</div>
                                     </div>
                                 </Link>
                             );

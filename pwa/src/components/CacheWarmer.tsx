@@ -20,6 +20,7 @@ const CRITICAL_ROUTES = [
     "/dashboard/reports/commercial",
     "/dashboard/reports/forecast",
     "/dashboard/reports/aliment",
+    "/",
     // Ajoutez d'autres routes si nécessaire
 ];
 
