@@ -6,11 +6,13 @@ import Link from 'next/link';
 import Select from 'react-select';
 import { useCustomers, CustomerOption } from '@/hooks/useCustomers';
 import { useSync } from "@/providers/SyncProvider";
+import toast from 'react-hot-toast';
 
+// Mise à jour de l'interface pour inclure plannedAt
 interface Visit {
     id: number | string;
-    visitedAt?: string;
-    plannedAt?: string; // Important
+    visitedAt?: string; // Peut être null si planifié uniquement
+    plannedAt?: string; // Nouvelle propriété
     technician: { fullname: string };
     customer: { name: string; zone: string };
     gpsCoordinates?: string;
@@ -60,19 +62,17 @@ export default function VisitsListPage() {
     const [datePrimary, setDatePrimary] = useState(new Date().toISOString().slice(0, 10));
     const [dateSecondary, setDateSecondary] = useState('');
     
-    // 👇 NOUVEAU : Mode d'affichage (Planning ou Historique)
+    // Mode d'affichage (Planning ou Historique)
     const [viewMode, setViewMode] = useState<'planning' | 'history'>('planning');
+    
+    // État pour indiquer le mode hors ligne
+    const [isOfflineMode, setIsOfflineMode] = useState(false);
 
     useEffect(() => {
         const fetchVisits = async () => {
             setLoading(true);
             const token = localStorage.getItem('sav_token');
             if (!token) { router.push('/'); return; }
-
-            if (!navigator.onLine) {
-                setLoading(false);
-                return;
-            }
 
             let url = `${API_URL}/visits?page=1`;
 
@@ -82,7 +82,6 @@ export default function VisitsListPage() {
                 url += `&customer=${customerId}`;
             }
 
-            // 👇 MODIFICATION MAJEURE ICI
             // On détermine sur quel champ filtrer et comment trier
             const dateField = viewMode === 'planning' ? 'plannedAt' : 'visitedAt';
             const sortOrder = viewMode === 'planning' ? 'asc' : 'desc'; // Planning = Chronologique, Historique = Antéchronologique
@@ -100,41 +99,76 @@ export default function VisitsListPage() {
                 else if (filterType === 'interval' && datePrimary && dateSecondary) range = getDateRange('interval', datePrimary, dateSecondary);
 
                 if (range.after && range.before) {
-                    // On utilise le champ dynamique (plannedAt ou visitedAt)
                     url += `&${dateField}[after]=${range.after}&${dateField}[before]=${range.before}`;
                 }
             } else {
-                // Si "Tout l'historique", on s'assure quand même de ne récupérer que ce qui a du sens
-                // Ex: Pour le planning, on veut plannedAt existant
                 if (viewMode === 'planning') url += `&plannedAt[exists]=true`;
                 if (viewMode === 'history') url += `&visitedAt[exists]=true`;
             }
 
+            // Clé de cache unique pour cette combinaison de filtres
+            const cacheKey = `offline_visits_${viewMode}_${filterType}_${datePrimary}_${selectedCustomer?.value || 'all'}`;
+
             try {
-                const res = await fetch(url, {
-                    headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-                });
+                // Tentative de fetch si en ligne
+                if (navigator.onLine) {
+                    const res = await fetch(url, {
+                        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+                    });
 
-                if (res.status === 401) {
-                    localStorage.removeItem('sav_token');
-                    router.push('/');
-                    return;
+                    if (res.status === 401) {
+                        localStorage.removeItem('sav_token');
+                        router.push('/');
+                        return;
+                    }
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        setVisits(data);
+                        setIsOfflineMode(false);
+                        
+                        // ✅ SAUVEGARDE EXPLICITE pour le offline
+                        localStorage.setItem(cacheKey, JSON.stringify(data));
+                        
+                        // Sauvegarde d'une liste globale de secours (optionnel mais utile)
+                        if (filterType === 'today' && !selectedCustomer) {
+                             localStorage.setItem('offline_visits_latest_default', JSON.stringify(data));
+                        }
+                    } else {
+                        throw new Error("Erreur serveur");
+                    }
+                } else {
+                    throw new Error("Hors ligne");
                 }
-
-                const data = await res.json();
-                setVisits(data);
             } catch (err) {
-                console.error(err);
+                console.warn("Mode Hors Ligne ou Erreur : Chargement depuis le stockage local");
+                setIsOfflineMode(true);
+                
+                // 🆘 RÉCUPÉRATION DE SECOURS (Fallback)
+                // 1. Essai avec la clé précise
+                const cachedData = localStorage.getItem(cacheKey);
+                // 2. Essai avec la liste par défaut si échec
+                const fallbackData = localStorage.getItem('offline_visits_latest_default');
+                
+                if (cachedData) {
+                    setVisits(JSON.parse(cachedData));
+                    if (!navigator.onLine) toast("Affichage des données hors ligne 📡", { id: 'offline-mode' });
+                } else if (fallbackData) {
+                    setVisits(JSON.parse(fallbackData));
+                    toast("Données partielles (Hors ligne) ⚠️", { id: 'offline-partial' });
+                } else {
+                    setVisits([]); // Rien en cache
+                }
             } finally {
                 setLoading(false);
             }
         };
 
         fetchVisits();
-    }, [router, selectedCustomer, filterType, datePrimary, dateSecondary, viewMode]); // Déclenche au changement de mode
+    }, [router, selectedCustomer, filterType, datePrimary, dateSecondary, viewMode]);
 
     const displayedVisits = useMemo(() => {
-        // ... (Logique Sync existante inchangée, elle fusionne juste les données)
+        // Logique Sync existante (File d'attente locale)
         const pendingVisits: Visit[] = queue
             .filter((item: any) => item.url === '/visits' && item.method === 'POST')
             .map((item: any) => ({
@@ -151,16 +185,19 @@ export default function VisitsListPage() {
         const validVisits = visits.filter((visit: Visit) => visit && visit.customer);
         const all = [...pendingVisits, ...validVisits];
         
-        // Tri visuel local (au cas où)
-        return all; 
-    }, [visits, queue]);
+        // Tri visuel local pour cohérence immédiate
+        return all.sort((a, b) => {
+             const dateA = new Date(a.plannedAt || a.visitedAt || 0).getTime();
+             const dateB = new Date(b.plannedAt || b.visitedAt || 0).getTime();
+             return viewMode === 'planning' ? dateA - dateB : dateB - dateA;
+        });
+    }, [visits, queue, viewMode]);
 
     const getVisitStatus = (visit: Visit) => {
         if (visit.__isPending) return { label: 'Sync...', color: 'yellow', border: 'border-yellow-300', bg: 'bg-yellow-50' };
         if (visit.closed) return { label: 'Clôturée', color: 'gray', border: 'border-gray-200', bg: 'bg-white' };
         if (visit.visitedAt) return { label: 'Réalisée', color: 'green', border: 'border-green-500', bg: 'bg-white' };
         if (visit.plannedAt) {
-            // Petit calcul pour voir si en retard
             const isLate = new Date(visit.plannedAt) < new Date() && !visit.visitedAt;
             return isLate 
                 ? { label: 'En retard', color: 'red', border: 'border-red-400', bg: 'bg-red-50' }
@@ -171,6 +208,13 @@ export default function VisitsListPage() {
 
     return (
         <div className="min-h-screen bg-gray-50 pb-20 font-sans">
+            {/* Indicateur Hors Ligne */}
+            {isOfflineMode && (
+                <div className="bg-orange-500 text-white text-xs font-bold text-center py-1">
+                    📡 Mode Hors Ligne activé - Affichage des données locales
+                </div>
+            )}
+
             <div className="bg-white shadow px-6 py-4 mb-6">
                 <div className="max-w-5xl mx-auto flex justify-between items-center">
                     <div>
@@ -187,7 +231,7 @@ export default function VisitsListPage() {
                 
                 <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-6 space-y-4">
                     
-                    {/* 👇 NOUVEAU : Onglets Planning / Historique */}
+                    {/* Onglets Planning / Historique */}
                     <div className="flex p-1 bg-gray-100 rounded-lg mb-4 w-full md:w-fit">
                         <button 
                             onClick={() => setViewMode('planning')}
@@ -204,7 +248,6 @@ export default function VisitsListPage() {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                        {/* ... (Le reste des filtres Période/Client reste identique) ... */}
                         <div className="md:col-span-3">
                             <label className="block text-xs font-bold text-gray-500 mb-1">Période</label>
                             <select 
@@ -262,7 +305,6 @@ export default function VisitsListPage() {
                         {displayedVisits.map(visit => {
                             if (!visit || !visit.customer) return null;
                             const status = getVisitStatus(visit);
-                            // On affiche la date pertinente selon le mode
                             const displayDate = viewMode === 'planning' ? visit.plannedAt : (visit.visitedAt || visit.plannedAt);
 
                             return (

@@ -30,21 +30,39 @@ export function useAuth() {
                 return;
             }
 
+            // 1. Décodage local (Toujours possible)
+            let payload;
             try {
-                // 1. Décodage local (Toujours possible)
-                const payload = JSON.parse(atob(token.split('.')[1]));
+                payload = JSON.parse(atob(token.split('.')[1]));
                 const now = Math.floor(Date.now() / 1000);
 
                 if (payload.exp < now) {
                     throw new Error("Token expiré");
                 }
-
                 if (!payload.id) {
                     throw new Error("Token invalide : ID manquant");
                 }
+            } catch (e) {
+                console.warn("Token invalide ou expiré :", e);
+                localStorage.removeItem('sav_token');
+                router.push('/');
+                return;
+            }
 
-                // 2. Vérification API et récupération des données utilisateur
-                if (navigator.onLine) {
+            // Helper pour mettre à jour l'état utilisateur (Mode hors ligne ou fallback)
+            const setOfflineUser = () => {
+                console.log("🌐 Mode Hors Ligne / Fallback : Validation API ignorée, connexion locale maintenue.");
+                setUser({
+                    id: payload.id,
+                    username: payload.username,
+                    roles: payload.roles,
+                    exp: payload.exp
+                });
+            };
+
+            // 2. Vérification API si en ligne
+            if (navigator.onLine) {
+                try {
                     const res = await fetch(`${API_URL}/users/${payload.id}`, {
                         headers: { 
                             'Authorization': `Bearer ${token}`, 
@@ -52,48 +70,51 @@ export function useAuth() {
                         }
                     });
 
-                    if (!res.ok) {
-                        throw new Error(`Erreur validation utilisateur (${res.status})`);
+                    if (res.ok) {
+                        const userData = await res.json();
+                        
+                        if (userData.activated === false) {
+                            console.warn("Compte archivé");
+                            localStorage.removeItem('sav_token');
+                            router.push('/');
+                            return;
+                        }
+
+                        // ✅ Fusion des données du token + données API
+                        setUser({
+                            id: payload.id,
+                            username: payload.username,
+                            roles: payload.roles,
+                            exp: payload.exp,
+                            firstName: userData.firstName,
+                            lastName: userData.lastName,
+                            email: userData.email,
+                            phone: userData.phone,
+                            activated: userData.activated
+                        });
+                    } else if (res.status === 401) {
+                        // Vrai rejet d'auth (Token révoqué ou invalide côté serveur)
+                        console.warn("Token rejeté par le serveur (401)");
+                        localStorage.removeItem('sav_token');
+                        router.push('/');
+                        return;
+                    } else {
+                        // Erreur serveur (500, etc.) -> On garde la session locale par sécurité
+                        console.warn(`Erreur serveur (${res.status}), bascule en mode hors ligne.`);
+                        setOfflineUser();
                     }
 
-                    const userData = await res.json();
-                    
-                    if (userData.activated === false) {
-                        throw new Error("Compte archivé");
-                    }
-
-                    // ✅ 3. Fusion des données du token + données API
-                    setUser({
-                        id: payload.id,
-                        username: payload.username,
-                        roles: payload.roles,
-                        exp: payload.exp,
-                        // Données enrichies depuis l'API
-                        firstName: userData.firstName,
-                        lastName: userData.lastName,
-                        email: userData.email,
-                        phone: userData.phone,
-                        activated: userData.activated
-                    });
-
-                } else {
-                    // Mode hors ligne : on utilise seulement les données du token
-                    console.log("🌐 Mode Hors Ligne : Validation API ignorée, connexion locale maintenue.");
-                    setUser({
-                        id: payload.id,
-                        username: payload.username,
-                        roles: payload.roles,
-                        exp: payload.exp
-                    });
+                } catch (e) {
+                    // Erreur réseau (fetch failed) alors qu'on pensait être en ligne
+                    console.warn("Erreur réseau lors de la vérification auth, bascule en mode hors ligne :", e);
+                    setOfflineUser();
                 }
-
-                setLoading(false);
-
-            } catch (e) {
-                console.warn("Session invalide :", e);
-                localStorage.removeItem('sav_token');
-                router.push('/');
+            } else {
+                // Déjà hors ligne
+                setOfflineUser();
             }
+
+            setLoading(false);
         };
 
         checkAuth();
