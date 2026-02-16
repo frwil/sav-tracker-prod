@@ -6,7 +6,7 @@ import { generateExpertInsights, calculateBenchmark } from "../../shared";
 interface StepSummaryProps extends StepProps {
     common: {
         concerns: string;
-        observation: string;
+        observationComment: string;
         recommendations: string;
     };
     newProblems: any[];
@@ -232,15 +232,15 @@ export const StepSummary = ({
             </div>
 
             {/* Observations et recommandations */}
-            {(common.observation || common.recommendations) && (
+            {(common.observationComment || common.recommendations) && (
                 <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 space-y-3">
-                    {common.observation && (
+                    {common.observationComment && (
                         <div>
                             <p className="text-xs font-bold text-blue-900 uppercase mb-1">
                                 Observations
                             </p>
                             <p className="text-sm text-blue-800">
-                                {common.observation}
+                                {common.observationComment}
                             </p>
                         </div>
                     )}

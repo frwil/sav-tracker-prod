@@ -7,7 +7,7 @@ import { ValidationErrors } from "../validation";
 interface StepProblemsProps {
     common: {
         concerns: string;
-        observation: string;
+        observationComment: string;
         recommendations: string;
     };
     setCommon: (c: any) => void;
@@ -67,9 +67,9 @@ export const StepProblems = ({
                     className="w-full border p-3 rounded-lg text-base focus:ring-2 focus:ring-indigo-500 outline-none"
                     rows={3}
                     placeholder="Comportement, ambiance, notes..."
-                    value={common.observation}
+                    value={common.observationComment}
                     onChange={(e) =>
-                        setCommon({ ...common, observation: e.target.value })
+                        setCommon({ ...common, observationComment: e.target.value })
                     }
                 />
             </div>
