@@ -69,7 +69,7 @@ export interface ObservationData {
 
 export interface CommonData {
     concerns: string;
-    observation: string;
+    observationComment: string;
     recommendations: string;
 }
 

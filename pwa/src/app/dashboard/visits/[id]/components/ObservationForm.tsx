@@ -165,7 +165,7 @@ export const ObservationForm = ({
 
     const [common, setCommon] = useState<CommonData>({
         concerns: initialData?.concerns || "",
-        observation: initialData?.observation || "",
+        observationComment: initialData?.observationComment || "",
         recommendations: initialData?.recommendations || "",
     });
 

@@ -39,7 +39,6 @@ export interface Observation {
     // Champs textuels
     problems?: string;
     recommendations?: string;
-    observationComment?: string;
     
     // Métriques (optionnel selon le type de visite)
     data?: {
