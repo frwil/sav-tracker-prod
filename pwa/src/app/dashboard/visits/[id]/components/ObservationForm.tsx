@@ -257,9 +257,11 @@ export const ObservationForm = ({
                 if (res.ok) {
                     const d = await res.json();
                     // ✅ Filtrer l'observation en cours si on est en mode édition
-                    const list = (d["hydra:member"] || d["member"] || []).filter(
-                        (obs: any) => obs.id !== initialData?.id
-                    );
+                    const list = (
+                        d["hydra:member"] ||
+                        d["member"] ||
+                        []
+                    ).filter((obs: any) => obs.id !== initialData?.id);
                     setHistoryList(list);
                     console.log("Historique chargé:", list.length, list);
 
@@ -504,12 +506,19 @@ export const ObservationForm = ({
                 return p["@id"];
             }
             // Si c'est un nouveau problème
-            return {
+            const problemData: any = {
                 description: p.description,
                 severity: p.severity,
                 status: "open",
-                detectedIn: observationIri, // Requis pour PATCH
             };
+
+            // Seulement ajouter detectedIn si on est en mode édition (PATCH)
+            // En création (POST), l'observation n'existe pas encore, donc on ne peut pas lier
+            if (isEditMode && observationIri) {
+                problemData.detectedIn = observationIri;
+            }
+
+            return problemData;
         });
 
         const body = {
