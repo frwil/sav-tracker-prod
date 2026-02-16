@@ -79,7 +79,7 @@ class Observation
 
     #[ORM\Column(type: Types::TEXT, nullable: true)]
     #[Groups(['observation:read', 'observation:write', 'visit:read'])]
-    private ?string $observation = null; // Observations de la visite (Analyse)
+    private ?string $observationComment = null; // Observations de la visite (Analyse)
 
     #[ORM\Column(type: Types::TEXT, nullable: true)]
     #[Groups(['observation:read', 'observation:write', 'visit:read'])]
@@ -181,13 +181,13 @@ class Observation
         return $this;
     }
 
-    public function getObservation(): ?string
+    public function getObservationComment(): ?string
     {
-        return $this->observation;
+        return $this->observationComment;
     }
-    public function setObservation(?string $observation): self
+    public function setObservationComment(?string $observationComment): self
     {
-        $this->observation = $observation;
+        $this->observationComment = $observationComment;
         return $this;
     }
 
